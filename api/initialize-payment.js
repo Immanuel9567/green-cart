@@ -10,6 +10,7 @@
 // told what the real total is.
 
 const { priceOrder, toKobo, QuoteError } = require('./_lib/pricing');
+const { readJson, send, rejectMethod } = require('./_lib/http');
 
 const PAYSTACK_API = 'https://api.paystack.co';
 
@@ -26,36 +27,31 @@ function newReference() {
 }
 
 module.exports = async function handler(request, response) {
-  if (request.method !== 'POST') {
-    response.setHeader('Allow', 'POST');
-    return response.status(405).json({ success: false, message: 'Use POST.' });
-  }
+  if (request.method !== 'POST') return rejectMethod(response, 'POST');
 
   const secretKey = readEnv('PAYSTACK_SECRET_KEY');
   if (!secretKey) {
     // Refusing is the honest answer. Charging without a key is impossible, and
     // pretending otherwise would create an order nobody can pay for.
-    return response.status(503).json({
+    return send(response, 503, {
       success: false,
       message: 'Card payments are not configured on this deployment yet.'
     });
   }
 
-  let body = request.body;
-  // Vercel parses JSON bodies, but a malformed or differently-encoded request
-  // should produce a clean 400 rather than a stack trace.
-  if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch (_) { body = null; }
+  const body = await readJson(request);
+  if (body === undefined) {
+    return send(response, 400, { success: false, message: 'The request body was not valid JSON.' });
   }
   if (!body || typeof body !== 'object') {
-    return response.status(400).json({ success: false, message: 'The request body could not be read.' });
+    return send(response, 400, { success: false, message: 'The request body could not be read.' });
   }
 
   const { lines, promo, email, customer } = body;
 
   const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (typeof email !== 'string' || !emailPattern.test(email.trim())) {
-    return response.status(400).json({ success: false, message: 'A valid email address is required to take payment.' });
+    return send(response, 400, { success: false, message: 'A valid email address is required to take payment.' });
   }
 
   let priced;
@@ -63,13 +59,13 @@ module.exports = async function handler(request, response) {
     priced = priceOrder({ lines, promo });
   } catch (error) {
     if (error instanceof QuoteError) {
-      return response.status(error.status).json({ success: false, message: error.message });
+      return send(response, error.status, { success: false, message: error.message });
     }
     throw error;
   }
 
   if (!priced.totals.total || priced.totals.total <= 0) {
-    return response.status(400).json({ success: false, message: 'This order has no payable total.' });
+    return send(response, 400, { success: false, message: 'This order has no payable total.' });
   }
 
   const reference = newReference();
@@ -109,7 +105,7 @@ module.exports = async function handler(request, response) {
       body: JSON.stringify(payload)
     });
   } catch (_) {
-    return response.status(502).json({
+    return send(response, 502, {
       success: false,
       message: 'Could not reach Paystack. No payment was taken; please try again.'
     });
@@ -119,11 +115,11 @@ module.exports = async function handler(request, response) {
   try {
     result = await paystackResponse.json();
   } catch (_) {
-    return response.status(502).json({ success: false, message: 'Paystack sent a response that could not be read.' });
+    return send(response, 502, { success: false, message: 'Paystack sent a response that could not be read.' });
   }
 
   if (!paystackResponse.ok || !result || result.status !== true) {
-    return response.status(502).json({
+    return send(response, 502, {
       success: false,
       // Paystack's own message is usually the useful one ("Invalid key",
       // "Currency not supported by merchant"). Pass it through.
@@ -131,7 +127,7 @@ module.exports = async function handler(request, response) {
     });
   }
 
-  return response.status(200).json({
+  return send(response, 200, {
     success: true,
     reference: result.data.reference,
     accessCode: result.data.access_code,

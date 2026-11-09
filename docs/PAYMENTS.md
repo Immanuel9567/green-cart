@@ -19,6 +19,7 @@ The gateway is in this repository and it is enforced server-side:
 | `api/verify-payment.js` | Asks Paystack whether the charge really succeeded, in the right currency, for the right amount |
 | `api/paystack-webhook.js` | Signature-checked server-to-server confirmation, for when the browser disappears |
 | `api/_lib/pricing.js` | The shared pricing rules, reused by the browser so the two can never drift |
+| `api/_lib/http.js` | Plain Node HTTP helpers, so the endpoints do not depend on any platform's body parser |
 | `js/payments.js` | The browser side: initialize → provider popup → verify |
 | `js/config.js` | The one switch: a public key and two endpoints |
 
@@ -35,6 +36,24 @@ Payments are **off until a public key is present**. With it absent, the
 checkout says so plainly and refuses to create an order.
 
 ---
+
+## Why the endpoints use plain Node HTTP
+
+Vercel adds `request.body`, `response.status()` and `response.json()` to functions.
+This gateway deliberately does **not** use them, and there is no `@vercel/node`
+dependency. Two reasons:
+
+1. **The webhook needs the original bytes.** `request.body` is a lazy getter that
+   parses the body when read. A Paystack webhook is signed with an HMAC over the
+   exact bytes sent, so a parsed-and-re-serialised body can never match. Reading
+   the stream first is the only correct order.
+2. **The opt-out is project-wide.** The documented way to remove those helpers is
+   a `NODEJS_HELPERS=0` environment variable, which would also strip
+   `response.status()`/`json()` from the other two endpoints. Per-file `config`
+   exports are a Next.js convention; Vercel does not read them from `/api`.
+
+The endpoints therefore run unchanged on any Node host, and the trade-off is
+recorded in `api/_lib/http.js` so it is not "tidied up" later.
 
 ## Step 1 — create the Paystack account (OWNER)
 
@@ -207,7 +226,10 @@ daily. That is an honest description; it is not a finished store.
 ### Also required before taking real money
 
 - A refund policy, terms of service, and a contact page that actually reaches
-  someone. Card networks require these.
+  someone. Card networks require these. The pages exist; the **details do not**.
+  Fill in `js/contact.js` — it holds the email, WhatsApp number and address used
+  by the legal pages and the footer, and the pages show a red warning naming
+  whatever is still a placeholder.
 - A privacy notice: you now collect names, addresses and emails.
 - Someone to answer support email within a day, or disputes will be opened.
 

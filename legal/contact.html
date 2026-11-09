@@ -17,9 +17,11 @@
     .legal-page ul { padding-left: 20px; margin: 10px 0; }
     .legal-page a { text-decoration: underline; }
     .legal-back { display: inline-block; margin-bottom: 20px; font-size: .82rem; font-weight: 700; }
-    .legal-todo { padding: 12px 16px; border-radius: 12px; background: rgba(180, 59, 69, .09); color: var(--danger); font-weight: 700; font-size: .85rem; }
+    .legal-todo { padding: 12px 16px; border-radius: 12px; background: rgba(180, 59, 69, .09); color: var(--danger); font-weight: 700; font-size: .85rem; margin: 16px 0 24px; }
     .legal-updated { color: var(--gray-muted); font-size: .78rem; font-weight: 700; margin-bottom: 24px; }
   </style>
+  <script src="/js/contact.js" defer></script>
+  <script src="/js/legal.js" defer></script>
 </head>
 <body>
   <main class="legal-page">
@@ -28,23 +30,25 @@
     <h1>Contact us</h1>
     <p class="legal-updated">Last updated: 6 November 2026</p>
 
-    <p class="legal-todo">
-      PLACEHOLDER — REPLACE BEFORE TAKING REAL ORDERS. Every channel below
-      must actually reach a person. Card networks expect a working contact route
-      and will side with a customer who could not find one.
-    </p>
+    <p class="legal-todo" data-contact-warning hidden></p>
 
     <h2>Get in touch</h2>
     <p>We answer messages within one working day.</p>
 
-    <h3>WhatsApp</h3>
-    <p>___ (replace with the business number, in international format, e.g. +234 800 000 0000).</p>
-
     <h3>Email</h3>
-    <p>___@shopgreencart.com</p>
+    <p data-contact="email">Not available yet.</p>
 
-    <h3>Registered business</h3>
-    <p>___<br>___<br>Port Harcourt, Rivers State, Nigeria</p>
+    <h3>WhatsApp</h3>
+    <p data-contact="whatsappDisplay">Not available yet.</p>
+
+    <h3>Business</h3>
+    <p><span data-contact="businessName">GreenCart</span><br>
+    <span data-contact="addressLine">Street address</span><br>
+    <span data-contact="city">Port Harcourt</span>, <span data-contact="state">Rivers State</span><br>
+    <span data-contact="country">Nigeria</span></p>
+
+    <h3>Opening hours</h3>
+    <p data-contact="hours">Monday to Saturday, 9am to 6pm.</p>
 
     <h2>About an order</h2>
     <p>Include your order reference (it starts with <strong>GC-</strong>) and the email address you used. If you are unsure of the reference, the last four digits of the payment plus the date are enough for us to find it.</p>

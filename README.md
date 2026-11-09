@@ -22,7 +22,7 @@ Three things are true today and are not hidden in the UI:
 
 - **A paid order is recorded only in the buyer's browser.** There is no database, so the seller does not receive it. Until that exists, sales are reconciled from the Paystack dashboard.
 - **The admin is not access-controlled.** It is out of the public nav, but anyone with the URL can open it.
-- **The legal pages are placeholders.** `legal/` ships with delivery windows, return periods, business details and contact channels marked for replacement.
+- **The legal pages are placeholders.** `legal/` ships with delivery windows and return periods marked for replacement, and the business contact details live in **`js/contact.js`** — one file that feeds the legal pages and the footer. The pages show a red banner naming whatever is still missing, and `tests/legal.test.js` fails once those details are filled in, so the site cannot quietly present itself as finished.
 
 Prices are stored in US dollars and displayed in naira by default, converted at a rate pinned in `js/config.js` with the date it was checked. Conversion never changes a stored price or an order total.
 

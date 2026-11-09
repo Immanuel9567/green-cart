@@ -233,6 +233,26 @@ const cases = [
       return { enabled: false, reason: 'secret-key-in-config' };
     }`,
     to: ''
+  },
+  {
+    name: 'the webhook trusts a parsed body instead of the signed bytes',
+    file: 'api/paystack-webhook.js',
+    from: `    event = JSON.parse(rawBody);`,
+    to: `    event = request.body;`
+  },
+  {
+    name: 'a payment is confirmed without checking the amount matches the quote',
+    file: 'api/verify-payment.js',
+    from: `  if (Number.isFinite(expectedKobo) && expectedKobo > 0 && Number(transaction.amount) !== expectedKobo) {`,
+    to: `  if (false) {`
+  },
+  {
+    name: 'the legal pages present themselves as finished while details are placeholders',
+    file: 'js/legal.js',
+    from: `  document.querySelectorAll('[data-contact-warning]').forEach(warning => {
+    if (!missing.length) {`,
+    to: `  document.querySelectorAll('[data-contact-warning]').forEach(warning => {
+    if (true) {`
   }
 ];
 

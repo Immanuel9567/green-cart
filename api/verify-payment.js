@@ -15,6 +15,7 @@
 // payment for a larger order.
 
 const { koboToNaira, koboToUsd } = require('./_lib/pricing');
+const { readJson, send, rejectMethod } = require('./_lib/http');
 
 const PAYSTACK_API = 'https://api.paystack.co';
 
@@ -24,26 +25,23 @@ function readEnv(name) {
 }
 
 module.exports = async function handler(request, response) {
-  if (request.method !== 'POST') {
-    response.setHeader('Allow', 'POST');
-    return response.status(405).json({ success: false, message: 'Use POST.' });
-  }
+  if (request.method !== 'POST') return rejectMethod(response, 'POST');
 
   const secretKey = readEnv('PAYSTACK_SECRET_KEY');
   if (!secretKey) {
-    return response.status(503).json({
+    return send(response, 503, {
       success: false,
       message: 'Payment verification is not configured on this deployment.'
     });
   }
 
-  let body = request.body;
-  if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch (_) { body = null; }
+  const body = await readJson(request);
+  if (body === undefined) {
+    return send(response, 400, { success: false, message: 'The request body was not valid JSON.' });
   }
   const reference = body && typeof body.reference === 'string' ? body.reference.trim() : '';
   if (!reference || reference.length > 100) {
-    return response.status(400).json({ success: false, message: 'A payment reference is required.' });
+    return send(response, 400, { success: false, message: 'A payment reference is required.' });
   }
 
   let paystackResponse;
@@ -52,7 +50,7 @@ module.exports = async function handler(request, response) {
       headers: { Authorization: `Bearer ${secretKey}` }
     });
   } catch (_) {
-    return response.status(502).json({
+    return send(response, 502, {
       success: false,
       message: 'Could not reach Paystack to confirm the payment. The order is not confirmed yet.'
     });
@@ -62,13 +60,13 @@ module.exports = async function handler(request, response) {
   try {
     result = await paystackResponse.json();
   } catch (_) {
-    return response.status(502).json({ success: false, message: 'Paystack sent a response that could not be read.' });
+    return send(response, 502, { success: false, message: 'Paystack sent a response that could not be read.' });
   }
 
   // Paystack answers 200 with status:false for an unknown reference, so both
   // the HTTP code and the body have to agree before this is a success.
   if (!paystackResponse.ok || !result || result.status !== true || !result.data) {
-    return response.status(200).json({
+    return send(response, 200, {
       success: false,
       message: (result && result.message) || 'This payment could not be found.'
     });
@@ -77,7 +75,7 @@ module.exports = async function handler(request, response) {
   const transaction = result.data;
 
   if (transaction.status !== 'success') {
-    return response.status(200).json({
+    return send(response, 200, {
       success: false,
       message: `The payment is ${transaction.status}, not successful.`,
       reference
@@ -85,7 +83,7 @@ module.exports = async function handler(request, response) {
   }
 
   if (String(transaction.currency || '').toUpperCase() !== 'NGN') {
-    return response.status(200).json({
+    return send(response, 200, {
       success: false,
       message: 'The payment currency did not match, so it was not accepted.',
       reference
@@ -98,14 +96,14 @@ module.exports = async function handler(request, response) {
   const metadata = transaction.metadata || {};
   const expectedKobo = Number(metadata.expectedKobo);
   if (Number.isFinite(expectedKobo) && expectedKobo > 0 && Number(transaction.amount) !== expectedKobo) {
-    return response.status(200).json({
+    return send(response, 200, {
       success: false,
       message: 'The amount paid did not match the order total, so it was not accepted.',
       reference
     });
   }
 
-  return response.status(200).json({
+  return send(response, 200, {
     success: true,
     reference: transaction.reference,
     amountKobo: Number(transaction.amount),

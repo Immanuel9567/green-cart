@@ -17,9 +17,11 @@
     .legal-page ul { padding-left: 20px; margin: 10px 0; }
     .legal-page a { text-decoration: underline; }
     .legal-back { display: inline-block; margin-bottom: 20px; font-size: .82rem; font-weight: 700; }
-    .legal-todo { padding: 12px 16px; border-radius: 12px; background: rgba(180, 59, 69, .09); color: var(--danger); font-weight: 700; font-size: .85rem; }
+    .legal-todo { padding: 12px 16px; border-radius: 12px; background: rgba(180, 59, 69, .09); color: var(--danger); font-weight: 700; font-size: .85rem; margin: 16px 0 24px; }
     .legal-updated { color: var(--gray-muted); font-size: .78rem; font-weight: 700; margin-bottom: 24px; }
   </style>
+  <script src="/js/contact.js" defer></script>
+  <script src="/js/legal.js" defer></script>
 </head>
 <body>
   <main class="legal-page">
@@ -28,14 +30,10 @@
     <h1>Terms of sale</h1>
     <p class="legal-updated">Last updated: 6 November 2026</p>
 
-    <p class="legal-todo">
-      PLACEHOLDER — REPLACE BEFORE TAKING REAL ORDERS. The business name,
-      registered address and governing jurisdiction must be correct. A customer
-      cannot enforce a contract with an unnamed party.
-    </p>
+    <p class="legal-todo" data-contact-warning hidden></p>
 
     <h2>About these terms</h2>
-    <p>These terms apply when you buy from GreenCart at shopgreencart.com. The seller is ___ ("we", "us"), of ___ . By placing an order you accept these terms.</p>
+    <p>These terms apply when you buy from <span data-contact="businessName">GreenCart</span> at shopgreencart.com. The seller is <span data-contact="businessName">GreenCart</span>, of <span data-contact="addressLine">the address on our contact page</span>, <span data-contact="city">Port Harcourt</span>, <span data-contact="state">Rivers State</span>. By placing an order you accept these terms.</p>
 
     <h2>Orders</h2>
     <p>An order is only accepted once payment is confirmed. We may cancel an order and refund you in full if an item turns out to be unavailable or was listed at an obviously wrong price.</p>
@@ -56,7 +54,7 @@
     <p>See our <a href="/legal/privacy.html">Privacy notice</a>.</p>
 
     <h2>Problems</h2>
-    <p>If something goes wrong, contact us first at <a href="/legal/contact.html">Contact</a> and we will try to put it right. These terms are governed by the laws of the Federal Republic of Nigeria.</p>
+    <p>If something goes wrong, <a href="/legal/contact.html">contact us</a> first and we will try to put it right. These terms are governed by the laws of the Federal Republic of Nigeria.</p>
   </main>
 </body>
 </html>

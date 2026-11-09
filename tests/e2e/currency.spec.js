@@ -99,3 +99,41 @@ test('switching currency never changes what an order is worth', async ({ page })
   expect(totals.subtotal).toBe(299);
   expect(totals.total).toBe(299);
 });
+
+test('the footer reaches every legal page and each renders without errors', async ({ page }) => {
+  // Card networks require a reachable returns policy, privacy notice and
+  // contact route. A link that 404s is the same as no link, and only a real
+  // browser navigation proves the file is served at that path.
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.route('https://images.unsplash.com/**', route => route.abort());
+  await page.goto('/');
+
+  const footer = page.locator('.footer-links');
+  await expect(footer).toBeVisible();
+  const links = await footer.getByRole('link').allTextContents();
+  expect(links).toEqual(['Delivery & returns', 'Privacy', 'Terms', 'Contact']);
+
+  for (const name of links) {
+    await page.goto('/');
+    await page.locator('.footer-links').getByRole('link', { name, exact: true }).click();
+    await expect(page).toHaveURL(/\/legal\//);
+    await expect(page.locator('.legal-page h1')).toBeVisible();
+    // The page must warn that its details are placeholders, not look finished.
+    await expect(page.locator('[data-contact-warning]')).toBeVisible();
+  }
+  expect(errors).toEqual([]);
+});
+
+test('a legal page shows real contact details once they are filled in', async ({ page }) => {
+  await page.route('**/js/contact.js', route => route.fulfill({
+    status: 200,
+    contentType: 'application/javascript',
+    body: 'window.GREENCART_CONTACT={businessName:"GreenCart Ltd",addressLine:"12 Aba Road",city:"Port Harcourt",state:"Rivers State",country:"Nigeria",email:"help@shopgreencart.com",whatsapp:"2348030000000",hours:"Mon-Sat"};window.GREENCART_CONTACT_MISSING=()=>[];'
+  }));
+  await page.goto('/legal/contact.html');
+  await expect(page.locator('[data-contact-warning]')).toBeHidden();
+  await expect(page.getByRole('link', { name: 'help@shopgreencart.com' })).toBeVisible();
+  await expect(page.getByRole('link', { name: '+234 803 000 0000' })).toBeVisible();
+});

@@ -58,11 +58,10 @@ const GREENCART_DEFAULTS = {
     // Both must be HTTPS. Leaving either blank keeps payments disabled — that
     // is the guard against "the browser says it worked".
     initializeUrl: '/api/initialize-payment',
-    verifyUrl: '/api/verify-payment',
-
-    // Paystack settles a naira charge in kobo, so amounts are multiplied by 100
-    // and rounded. Kept here rather than inline so the tests can assert it.
-    minorUnits: 100
+    verifyUrl: '/api/verify-payment'
+    // Note: there is deliberately no amount conversion here. The browser shows
+    // prices; the server alone turns a price into a charge, in
+    // api/_lib/pricing.js. See the comment at the top of js/currency.js.
   }
 };
 

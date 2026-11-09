@@ -6,6 +6,12 @@
 // rule that keeps a ₦ order and a $ order describing the same value, and stops
 // a rate change from silently repricing things a customer already bought.
 //
+// This module formats prices for display and nothing else. It deliberately does
+// NOT convert a price into a charge amount: that happens once, on the server, in
+// api/_lib/pricing.js. Having a second converter here would be two places
+// computing money, which is how a store ends up charging a different figure from
+// the one it showed.
+//
 // The rate itself is hand-pinned in js/config.js with the date it was checked.
 // A browser-only store cannot fetch a live rate at checkout and still be able
 // to prove the amount it charged, so the rate is stated rather than fetched.
@@ -88,14 +94,6 @@
     return formatters[active].format(convert(usdAmount));
   }
 
-  // The amount in the minor unit the payment provider expects (kobo for NGN,
-  // cents for USD). Paystack rejects fractional units, so this rounds rather
-  // than truncates — a ₦402,557.98 charge must not become ₦402,557.
-  function toMinorUnits(usdAmount) {
-    const factor = (CONFIG.payments && CONFIG.payments.minorUnits) || 100;
-    return Math.round(convert(usdAmount) * factor);
-  }
-
   function label(code) {
     return normalize(code) || active;
   }
@@ -117,7 +115,6 @@
     toggle,
     convert,
     format,
-    toMinorUnits,
     label,
     rateInfo
   };

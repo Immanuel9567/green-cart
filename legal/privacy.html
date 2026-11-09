@@ -17,9 +17,11 @@
     .legal-page ul { padding-left: 20px; margin: 10px 0; }
     .legal-page a { text-decoration: underline; }
     .legal-back { display: inline-block; margin-bottom: 20px; font-size: .82rem; font-weight: 700; }
-    .legal-todo { padding: 12px 16px; border-radius: 12px; background: rgba(180, 59, 69, .09); color: var(--danger); font-weight: 700; font-size: .85rem; }
+    .legal-todo { padding: 12px 16px; border-radius: 12px; background: rgba(180, 59, 69, .09); color: var(--danger); font-weight: 700; font-size: .85rem; margin: 16px 0 24px; }
     .legal-updated { color: var(--gray-muted); font-size: .78rem; font-weight: 700; margin-bottom: 24px; }
   </style>
+  <script src="/js/contact.js" defer></script>
+  <script src="/js/legal.js" defer></script>
 </head>
 <body>
   <main class="legal-page">
@@ -28,20 +30,16 @@
     <h1>Privacy notice</h1>
     <p class="legal-updated">Last updated: 6 November 2026</p>
 
-    <p class="legal-todo">
-      PLACEHOLDER — REPLACE BEFORE TAKING REAL ORDERS. Fill in the business
-      name, address and contact email, and confirm the retention periods. A
-      privacy notice that names no one responsible is not a privacy notice.
-    </p>
+    <p class="legal-todo" data-contact-warning hidden></p>
 
     <h2>Who we are</h2>
-    <p>GreenCart ("we", "us") sells everyday goods online at shopgreencart.com. Our business address is ___ and you can reach us at ___@shopgreencart.com.</p>
+    <p><span data-contact="businessName">GreenCart</span>, of <span data-contact="addressLine">the address on our contact page</span>, <span data-contact="city">Port Harcourt</span>, <span data-contact="state">Rivers State</span>, <span data-contact="country">Nigeria</span>. You can reach us at <span data-contact="email">our contact page</span>.</p>
 
     <h2>What we collect</h2>
     <ul>
       <li><strong>Order details:</strong> your name, delivery address, city and email address.</li>
       <li><strong>Payment information:</strong> handled entirely by our payment provider, Paystack. <strong>We never see or store your card number.</strong> We receive only a confirmation that a payment succeeded, plus a reference.</li>
-      <li><strong>Technical information:</strong> whatever your browser and our host automatically record to serve the page.</li>
+      <li><strong>Technical information:</strong> whatever your browser and our host automatically record in order to serve the page.</li>
     </ul>
 
     <h2>What is stored in your browser</h2>
@@ -59,7 +57,7 @@
     <p>Order records are kept for ___ years to satisfy tax and accounting rules. Enquiries that do not lead to an order are kept for ___ months.</p>
 
     <h2>Your rights</h2>
-    <p>Under the Nigeria Data Protection Act you may ask to see, correct or delete the personal information we hold about you. Contact us at ___@shopgreencart.com and we will respond within 30 days.</p>
+    <p>Under the Nigeria Data Protection Act you may ask to see, correct or delete the personal information we hold about you. Contact <span data-contact="email">us</span> and we will respond within 30 days.</p>
 
     <h2>Cookies</h2>
     <p>This site sets no advertising or tracking cookies. It uses your browser's local storage to remember your bag, your currency choice and your theme preference.</p>

@@ -16,18 +16,42 @@ const initialize = require(path.join(__dirname, '..', 'api', 'initialize-payment
 const verify = require(path.join(__dirname, '..', 'api', 'verify-payment.js'));
 const webhook = require(path.join(__dirname, '..', 'api', 'paystack-webhook.js'));
 
-// A minimal stand-in for Vercel's request/response objects.
+// A stand-in for Node's http.ServerResponse. The endpoints use standard Node
+// HTTP only (api/_lib/http.js), so the test double must too: `end()` with a
+// string body and `setHeader`. No Vercel helpers are assumed anywhere, which is
+// the whole point of that module.
 function mockResponse() {
-  const captured = { statusCode: null, body: null, headers: {} };
   const response = {
     statusCode: null,
     body: null,
     headers: {},
-    status(code) { captured.statusCode = code; response.statusCode = code; return response; },
-    json(body) { captured.body = body; response.body = body; return response; },
-    setHeader(key, value) { captured.headers[key] = value; response.headers[key] = value; }
+    setHeader(key, value) { response.headers[key] = value; return response; },
+    end(chunk) {
+      if (typeof chunk === 'string') {
+        try { response.body = JSON.parse(chunk); } catch (_) { response.body = chunk; }
+      }
+      return response;
+    }
   };
   return response;
+}
+
+// A request whose body arrives as a stream, the way a real POST does.
+function mockRequest(body, { method = 'POST', headers = {} } = {}) {
+  const chunks = body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body), 'utf8')];
+  return {
+    method,
+    headers,
+    [Symbol.asyncIterator]() {
+      let index = 0;
+      return {
+        async next() {
+          if (index >= chunks.length) return { done: true, value: undefined };
+          return { done: false, value: chunks[index++] };
+        }
+      };
+    }
+  };
 }
 
 const originalFetch = global.fetch;
@@ -83,7 +107,7 @@ test('dollars become kobo through naira, not directly', () => {
 test('initialize refuses politely without a secret key', async () => {
   delete process.env.PAYSTACK_SECRET_KEY;
   const response = mockResponse();
-  await initialize({ method: 'POST', body: { lines: [{ id: 'aura-01', quantity: 1 }], email: 'a@b.co' } }, response);
+  await initialize(mockRequest({ lines: [{ id: 'aura-01', quantity: 1 }], email: 'a@b.co' }), response);
   assert.equal(response.statusCode, 503);
   assert.match(response.body.message, /not configured/i);
   restore();
@@ -95,7 +119,7 @@ test('initialize demands a valid email before touching Paystack', async () => {
   global.fetch = async () => { called = true; return { ok: true, json: async () => ({ status: true, data: {} }) }; };
   for (const email of ['', 'nope', 'a@b', '   ']) {
     const response = mockResponse();
-    await initialize({ method: 'POST', body: { lines: [{ id: 'aura-01', quantity: 1 }], email } }, response);
+    await initialize(mockRequest({ lines: [{ id: 'aura-01', quantity: 1 }], email }), response);
     assert.equal(response.statusCode, 400, `email "${email}" must be rejected`);
   }
   assert.equal(called, false, 'Paystack must not be contacted without a valid email');
@@ -113,10 +137,10 @@ test('initialize sends Paystack the server-computed amount in kobo', async () =>
     };
   };
   const response = mockResponse();
-  await initialize({
-    method: 'POST',
-    body: { lines: [{ id: 'aura-01', quantity: 1 }], email: 'ada@example.com', customer: { name: 'Ada', city: 'PH' } }
-  }, response);
+  await initialize(
+    mockRequest({ lines: [{ id: 'aura-01', quantity: 1 }], email: 'ada@example.com', customer: { name: 'Ada', city: 'PH' } }),
+    response
+  );
 
   assert.equal(response.statusCode, 200);
   assert.equal(sent.url, 'https://api.paystack.co/transaction/initialize');
@@ -135,7 +159,7 @@ test('initialize relays a Paystack refusal instead of inventing success', async 
   process.env.PAYSTACK_SECRET_KEY = 'sk_test_x';
   global.fetch = async () => ({ ok: false, json: async () => ({ status: false, message: 'Invalid key' }) });
   const response = mockResponse();
-  await initialize({ method: 'POST', body: { lines: [{ id: 'aura-01', quantity: 1 }], email: 'a@b.co' } }, response);
+  await initialize(mockRequest({ lines: [{ id: 'aura-01', quantity: 1 }], email: 'a@b.co' }), response);
   assert.equal(response.statusCode, 502);
   assert.equal(response.body.success, false);
   assert.match(response.body.message, /Invalid key/);
@@ -152,11 +176,11 @@ test('initialize refuses an unpurchasable quantity before contacting Paystack', 
   // that must be a conflict (409) because the catalogue, not the request, is
   // what rules it out.
   const tooMany = mockResponse();
-  await initialize({ method: 'POST', body: { lines: [{ id: 'aura-01', quantity: 500 }], email: 'a@b.co' } }, tooMany);
+  await initialize(mockRequest({ lines: [{ id: 'aura-01', quantity: 500 }], email: 'a@b.co' }), tooMany);
   assert.equal(tooMany.statusCode, 400);
 
   const tooFewLeft = mockResponse();
-  await initialize({ method: 'POST', body: { lines: [{ id: 'aura-01', quantity: 20 }], email: 'a@b.co' } }, tooFewLeft);
+  await initialize(mockRequest({ lines: [{ id: 'aura-01', quantity: 20 }], email: 'a@b.co' }), tooFewLeft);
   assert.equal(tooFewLeft.statusCode, 409);
   assert.match(tooFewLeft.body.message, /does not have that many left/);
 
@@ -171,7 +195,7 @@ test('verify refuses a failed transaction', async () => {
     json: async () => ({ status: true, data: { status: 'failed', reference: 'R1', currency: 'NGN', amount: 100 } })
   });
   const response = mockResponse();
-  await verify({ method: 'POST', body: { reference: 'R1' } }, response);
+  await verify(mockRequest({ reference: 'R1' }), response);
   assert.equal(response.body.success, false);
   assert.match(response.body.message, /not successful/);
   restore();
@@ -184,7 +208,7 @@ test('verify refuses a payment in the wrong currency', async () => {
     json: async () => ({ status: true, data: { status: 'success', reference: 'R2', currency: 'USD', amount: 29900 } })
   });
   const response = mockResponse();
-  await verify({ method: 'POST', body: { reference: 'R2' } }, response);
+  await verify(mockRequest({ reference: 'R2' }), response);
   assert.equal(response.body.success, false);
   assert.match(response.body.message, /currency/);
   restore();
@@ -204,7 +228,7 @@ test('verify refuses an amount that does not match the quote', async () => {
     })
   });
   const response = mockResponse();
-  await verify({ method: 'POST', body: { reference: 'R3' } }, response);
+  await verify(mockRequest({ reference: 'R3' }), response);
   assert.equal(response.body.success, false);
   assert.match(response.body.message, /did not match/);
   restore();
@@ -224,7 +248,7 @@ test('verify confirms a genuine, correctly-priced payment', async () => {
     })
   });
   const response = mockResponse();
-  await verify({ method: 'POST', body: { reference: 'R4' } }, response);
+  await verify(mockRequest({ reference: 'R4' }), response);
   assert.equal(response.body.success, true);
   assert.equal(response.body.reference, 'R4');
   assert.equal(response.body.usdTotal, 299);
@@ -235,11 +259,11 @@ test('verify refuses an unknown reference and a missing one', async () => {
   process.env.PAYSTACK_SECRET_KEY = 'sk_test_x';
   global.fetch = async () => ({ ok: true, json: async () => ({ status: false, message: 'Transaction not found' }) });
   const notFound = mockResponse();
-  await verify({ method: 'POST', body: { reference: 'nope' } }, notFound);
+  await verify(mockRequest({ reference: 'nope' }), notFound);
   assert.equal(notFound.body.success, false);
 
   const missing = mockResponse();
-  await verify({ method: 'POST', body: {} }, missing);
+  await verify(mockRequest({}), missing);
   assert.equal(missing.statusCode, 400);
   restore();
 });
@@ -248,20 +272,16 @@ test('verify refuses an unknown reference and a missing one', async () => {
 
 function signedRequest(body, secret) {
   const raw = JSON.stringify(body);
-  return {
-    method: 'POST',
-    body: raw,
-    headers: {
-      'x-paystack-signature': crypto.createHmac('sha512', secret).update(raw).digest('hex')
-    }
-  };
+  return mockRequest(raw, {
+    headers: { 'x-paystack-signature': crypto.createHmac('sha512', secret).update(raw).digest('hex') }
+  });
 }
 
 test('the webhook rejects an unsigned or forged request', async () => {
   process.env.PAYSTACK_SECRET_KEY = 'sk_test_real';
   const payload = { event: 'charge.success', data: { reference: 'W1' } };
 
-  const unsigned = { method: 'POST', body: JSON.stringify(payload), headers: {} };
+  const unsigned = mockRequest(payload);
   const a = mockResponse();
   await webhook(unsigned, a);
   assert.equal(a.statusCode, 401);
@@ -316,7 +336,7 @@ test('a pre-parsed body is refused rather than silently failing every signature'
   const response = mockResponse();
   await webhook({
     method: 'POST',
-    body: { event: 'charge.success', data: { reference: 'W3' } }, // parsed object
+    body: { event: 'charge.success', data: { reference: 'W3' } }, // parsed object, no stream
     headers: { 'x-paystack-signature': 'whatever' }
   }, response);
   assert.equal(response.statusCode, 400);
@@ -324,8 +344,11 @@ test('a pre-parsed body is refused rather than silently failing every signature'
   restore();
 });
 
-test('the webhook disables the platform body parser', () => {
-  // Without this export Vercel hands over a parsed object and the raw-body
-  // check above fires on every request.
-  assert.deepEqual(webhook.config, { api: { bodyParser: false } });
+test('the webhook does not rely on any platform-specific body parser setting', () => {
+  // Vercel does not read a `config` export from an /api function; the documented
+  // opt-out is a project-wide NODEJS_HELPERS=0, which would break the other
+  // endpoints. So the endpoint must work with the helpers LEFT ON. This asserts
+  // it defines no such config and reads the stream itself.
+  assert.equal(webhook.config, undefined);
+  assert.equal(Array.isArray(webhook.bodyParser), false);
 });

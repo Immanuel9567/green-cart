@@ -2,6 +2,74 @@
 
 This file records meaningful repository changes and the checks that support them. See [agent.md](agent.md) for the required entry and handoff rules. Dates use the owner's local date; `Unreleased` means the work is not yet part of a named release.
 
+## Unreleased — 2026-11-06 (fix pass)
+
+### Fixed — the webhook would have rejected every real payment
+
+- `api/paystack-webhook.js` read the signed bytes for the HMAC, then parsed
+  `request.body` for the event. On a streamed request `request.body` is
+  `undefined`, so **every genuine Paystack webhook would have failed** with "Body
+  was not JSON" while looking correct in review. It now parses the bytes it just
+  verified. Caught by testing over a real HTTP server with a real HMAC rather
+  than only through an in-process mock.
+
+### Fixed — the gateway depended on platform behaviour that was not in effect
+
+- The endpoints used Vercel's convenience helpers (`request.body`,
+  `response.status()`, `response.json()`) and a `module.exports.config =
+  { api: { bodyParser: false } }` export to switch body parsing off. **Vercel does
+  not read that export from `/api`** — it is a Next.js convention — and the
+  documented opt-out is a project-wide `NODEJS_HELPERS=0`, which would have
+  removed `response.status()`/`json()` from the other two endpoints as well. The
+  configuration was therefore both useless and, if it had worked, self-defeating.
+- All three endpoints now use plain Node HTTP through a new `api/_lib/http.js`,
+  which reads the stream **before** ever touching `request.body` (reading it on
+  Vercel invokes the parser and consumes the stream). They behave identically with
+  the helpers on or off, need no `@vercel/node` dependency, and run on any Node
+  host.
+- Verified on a bare `node:http` server: unsigned webhook → 401, wrong signature →
+  401, correctly signed → re-verified, `GET` on a POST endpoint → 405 with
+  `Allow: POST`.
+
+### Fixed — dead money code that could drift
+
+- `js/currency.js` exported `toMinorUnits()`, a second implementation of
+  "convert a price into a charge amount", used nowhere. Two implementations of
+  money maths is how a store ends up charging a different figure from the one it
+  displayed. Removed, with a note in `js/config.js` and `js/currency.js` saying the
+  server alone converts amounts.
+
+### Fixed — 3.8 MB of images on a mobile-first store
+
+- Fourteen product photos were 1024–1254px JPEGs of 400–556 KB, served whole to
+  every visitor on every load. Resized to 1000px (the detail page renders ~660 CSS
+  px, so this is still sharp at 2×) and re-encoded at quality 84: **3.79 MB →
+  980 KB, a 74% reduction**. Checked visually at `deviceScaleFactor: 2`, not just
+  by file size. Originals kept outside the repo.
+
+### Added — contact details with a warning that cannot be missed
+
+- `js/contact.js` holds the business email, WhatsApp number, address and hours
+  used by the legal pages and the footer. The legal pages render from it via
+  `data-contact` hooks, so a number that is right on the contact page cannot be
+  stale in the footer.
+- While any required detail is still a placeholder the pages show a red banner
+  **naming exactly what is missing** ("email address, street address, WhatsApp
+  number"), and channels that do not exist are hidden rather than shown as empty
+  rows. `tests/legal.test.js` asserts this, and the guard test **fails the moment
+  real details are filled in** — verified by filling them in and watching three
+  tests go red, so the suite cannot silently rubber-stamp a half-finished store.
+
+### Verification — fix pass
+
+- `npm test`: **82/82** (was 76). New `tests/legal.test.js` covers the warning,
+  hidden channels, real details replacing placeholders, and the placeholder guard.
+- Mutations: **37/37 caught** (was 34). New mutations cover the webhook parsing
+  the wrong source, verification skipping the amount check, and the legal pages
+  presenting as finished while details are missing.
+- Endpoints exercised over real HTTP with a real HMAC signature, not only
+  in-process.
+
 ## Unreleased — 2026-11-06 (later)
 
 ### Added — a real card payment gateway, honest until switched on

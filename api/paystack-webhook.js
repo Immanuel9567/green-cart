@@ -13,29 +13,7 @@
 // anyone could POST a fake "payment succeeded" to this URL.
 
 const crypto = require('node:crypto');
-
-// Vercel's Node runtime parses JSON bodies by default, which destroys the exact
-// byte sequence the signature covers. With bodyParser disabled the body arrives
-// as a stream, so it is collected here. The other shapes are handled too, so the
-// endpoint still works if it is ever mounted on a different host.
-async function readRawBody(request) {
-  if (Buffer.isBuffer(request.body)) return request.body;
-  if (typeof request.body === 'string') return request.body;
-  if (request.body && typeof request.body === 'object' && typeof request.body.pipe !== 'function') {
-    // Already parsed by the platform: the raw bytes are gone. Hashing a
-    // re-serialised copy would never match, so fail loudly rather than silently
-    // rejecting every real webhook.
-    throw new Error('Body was pre-parsed; the raw bytes needed for signature checking are unavailable.');
-  }
-  if (!request || typeof request.pipe !== 'function') {
-    throw new Error('No readable request body.');
-  }
-  const chunks = [];
-  for await (const chunk of request) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk);
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
+const { readRawBody, send, rejectMethod } = require('./_lib/http');
 
 function readEnv(name) {
   const value = process.env[name];
@@ -43,27 +21,24 @@ function readEnv(name) {
 }
 
 module.exports = async function handler(request, response) {
-  if (request.method !== 'POST') {
-    response.setHeader('Allow', 'POST');
-    return response.status(405).json({ success: false, message: 'Use POST.' });
-  }
+  if (request.method !== 'POST') return rejectMethod(response, 'POST');
 
   const secretKey = readEnv('PAYSTACK_SECRET_KEY');
   if (!secretKey) {
     // Without a key there is no way to prove a request came from Paystack, so
     // nothing may be trusted. Answer 503 so Paystack retries later.
-    return response.status(503).json({ success: false, message: 'Webhook is not configured.' });
+    return send(response, 503, { success: false, message: 'Webhook is not configured.' });
   }
 
   // The signature is computed over the EXACT bytes Paystack sent. Re-serialising
   // a parsed body would change key order and whitespace and break the match, so
-  // this endpoint turns Vercel's body parser off (see `config` at the bottom)
-  // and reads the stream itself.
+  // the raw bytes are read first and then parsed here. See api/_lib/http.js for
+  // why this endpoint uses no platform body-parsing helpers.
   let rawBody;
   try {
     rawBody = await readRawBody(request);
   } catch (_) {
-    return response.status(400).json({ success: false, message: 'The request body could not be read.' });
+    return send(response, 400, { success: false, message: 'The request body could not be read.' });
   }
 
   const signature = String(request.headers['x-paystack-signature'] || '');
@@ -77,20 +52,23 @@ module.exports = async function handler(request, response) {
     && crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
 
   if (!authentic) {
-    return response.status(401).json({ success: false, message: 'Signature mismatch.' });
+    return send(response, 401, { success: false, message: 'Signature mismatch.' });
   }
 
+  // Parse the bytes that were actually signed. `request.body` must not be used
+  // here: on a streamed request it is undefined, which would reject every real
+  // webhook, and on Vercel reading it would have consumed the stream already.
   let event;
   try {
-    event = typeof request.body === 'string' ? JSON.parse(request.body) : request.body;
+    event = JSON.parse(rawBody);
   } catch (_) {
-    return response.status(400).json({ success: false, message: 'Body was not JSON.' });
+    return send(response, 400, { success: false, message: 'Body was not JSON.' });
   }
 
   // Only charge successes matter here. Every other event is acknowledged so
   // Paystack stops retrying it — an unanswered webhook is retried for days.
   if (!event || event.event !== 'charge.success' || !event.data) {
-    return response.status(200).json({ success: true, ignored: true });
+    return send(response, 200, { success: true, ignored: true });
   }
 
   const transaction = event.data;
@@ -107,11 +85,11 @@ module.exports = async function handler(request, response) {
     verification = await verifiedResponse.json();
   } catch (_) {
     // Ask for a retry rather than acknowledging something unconfirmed.
-    return response.status(502).json({ success: false, message: 'Could not re-verify the transaction.' });
+    return send(response, 502, { success: false, message: 'Could not re-verify the transaction.' });
   }
 
   if (!verification || verification.status !== true || !verification.data || verification.data.status !== 'success') {
-    return response.status(200).json({ success: true, confirmed: false });
+    return send(response, 200, { success: true, confirmed: false });
   }
 
   // A real store records the order in a database here, idempotently keyed by
@@ -129,7 +107,7 @@ module.exports = async function handler(request, response) {
 
   console.log('[paystack-webhook] confirmed payment', JSON.stringify(confirmed));
 
-  return response.status(200).json({
+  return send(response, 200, {
     success: true,
     confirmed: true,
     reference: confirmed.reference,
@@ -137,6 +115,3 @@ module.exports = async function handler(request, response) {
     note: 'Payment confirmed. Order persistence is not configured on this deployment.'
   });
 };
-
-// Vercel: do not parse this body. The signature is computed over the raw bytes.
-module.exports.config = { api: { bodyParser: false } };

@@ -1,3 +1,8 @@
 node_modules/
 playwright-report/
 test-results/
+
+# Never commit real secrets. See .env.example for the shape of each value.
+.env
+.env.*
+!.env.example

@@ -33,9 +33,11 @@ function loadPage() {
   };
   inject('js/config.js');
   inject('js/currency.js');
+  inject('js/search.js');
   inject('js/products.js');
   inject('js/store.js');
   inject('js/payments.js');
+  inject('js/sync.js');
   inject('js/app.js');
   // Top-level `const` bindings are not placed on `window`, so expose the public
   // handles the tests need through a small bridge.
@@ -43,6 +45,21 @@ function loadPage() {
   bridge.textContent = 'window.AppStore = AppStore; window.renderAdminOrders = renderAdminOrders; window.renderCartDrawer = renderCartDrawer; window.renderAdminProducts = renderAdminProducts; window.renderAdminOrders = renderAdminOrders; window.renderAdminInventory = renderAdminInventory; window.adminListState = adminListState; window.renderProductPage = renderProductPage; window.getFilteredProducts = getFilteredProducts; window.renderAdminCustomers = renderAdminCustomers; window.renderAdminDiscounts = renderAdminDiscounts; window.restorePagerFocus = restorePagerFocus; window.announceListChange = announceListChange; window.renderAdminList = renderAdminList; window.renderAdminRecovery = renderAdminRecovery; window.renderAdminPanel = renderAdminPanel;';
   window.document.body.appendChild(bridge);
   return { window, document: window.document, errors, close: () => window.close() };
+}
+
+// Open the admin area as a signed-in owner.
+//
+// The admin panel now sits behind a password gate, so a test that clicks straight
+// into it would be testing a screen no user can see. This performs the same steps
+// the page does after a successful sign-in, without a network.
+function openAdmin(window, document) {
+  window.GreenCartSync.signIn = async () => ({ ok: true, token: 'test-token' });
+  window.GreenCartSync.isSignedIn = () => true;
+  window.GreenCartSync.isAvailable = () => false;
+  window.GreenCartSync.pullState = async () => ({ ok: false, reason: 'unavailable', message: 'not configured in tests' });
+  window.GreenCartSync.fetchOrders = async () => ({ ok: false, reason: 'unavailable', message: 'not configured in tests' });
+  window.renderAdminAccess();
+  document.querySelector('[data-tab="admin"]').click();
 }
 
 test('the storefront renders products, categories and empty account state', () => {
@@ -404,7 +421,7 @@ test('paging keeps keyboard focus on the pager instead of dropping it to the bod
     const { window, document } = page;
     // jsdom refuses to focus an element inside a hidden section, so the admin
     // panel has to be open for these assertions to mean anything.
-    document.querySelector('[data-tab="admin"]').click();
+    openAdmin(window, document);
     document.querySelector('[data-admin="products"]').click();
     window.renderAdminProducts();
     document.querySelector('[data-product-filter="all"]').click();
@@ -445,7 +462,7 @@ test('focus fallback reaches the status line when both arrows are unavailable', 
   const page = loadPage();
   try {
     const { window, document } = page;
-    document.querySelector('[data-tab="admin"]').click();
+    openAdmin(window, document);
     document.querySelector('[data-admin="products"]').click();
     // Narrow to a single page so neither arrow can be used after paging.
     const search = document.getElementById('adminProductSearch');
@@ -469,7 +486,7 @@ test('focus survives a re-render caused by an action other than paging', () => {
   const page = loadPage();
   try {
     const { window, document } = page;
-    document.querySelector('[data-tab="admin"]').click();
+    openAdmin(window, document);
     document.querySelector('[data-admin="products"]').click();
     window.renderAdminProducts();
 
@@ -499,7 +516,7 @@ test('page changes are announced through one live region that is never replaced'
   const page = loadPage();
   try {
     const { window, document } = page;
-    document.querySelector('[data-tab="admin"]').click();
+    openAdmin(window, document);
     document.querySelector('[data-admin="products"]').click();
     window.renderAdminProducts();
     document.querySelector('[data-product-filter="all"]').click();
@@ -692,7 +709,7 @@ test('the admin says so when saved data could not be read', () => {
   const page = loadPage();
   try {
     const { window, document } = page;
-    document.querySelector('[data-tab="admin"]').click();
+    openAdmin(window, document);
     const banner = document.getElementById('adminRecovery');
 
     // A healthy store is quiet.

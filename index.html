@@ -166,10 +166,15 @@
       <fieldset class="payment-fieldset">
         <legend>Payment</legend>
         <div class="payment-options" role="radiogroup" aria-label="Payment method">
-          <button type="button" class="pay-card-pill active" role="radio" aria-checked="true" tabindex="0" data-payment="Card"><span class="payment-mark" aria-hidden="true">▭</span><span>Card</span></button>
+          <!-- Pay on delivery is selected by default so a shopper can complete an
+               order before card payments are switched on. Card is shown but
+               disabled-by-behaviour: choosing it explains honestly that it is not
+               available, rather than hiding the option and looking incomplete. -->
+          <button type="button" class="pay-card-pill active" role="radio" aria-checked="true" tabindex="0" data-payment="Pay on delivery"><span class="payment-mark" aria-hidden="true">◱</span><span>Pay on delivery</span></button>
+          <button type="button" class="pay-card-pill" role="radio" aria-checked="false" tabindex="-1" data-payment="Card"><span class="payment-mark" aria-hidden="true">▭</span><span>Card</span></button>
         </div>
       </fieldset>
-      <p class="checkout-disclosure" id="checkoutDisclosure">Card payments are not switched on yet, so orders cannot be placed right now.</p>
+      <p class="checkout-disclosure" id="checkoutDisclosure">You will pay in cash when your order is delivered.</p>
       <button type="submit" class="checkout-btn" id="confirmPayBtn">Place order <span aria-hidden="true">→</span></button>
     </form>
     <div id="orderSuccessScreen" class="order-success-screen" hidden>
@@ -204,9 +209,32 @@
           <button type="button" class="admin-tab" data-admin="customers">Customers</button>
           <button type="button" class="admin-tab" data-admin="discounts">Promotions</button>
         </nav>
-        <div class="admin-local-note"><span aria-hidden="true"></span> Local preview</div>
+        <!-- The connection state is stated honestly. "Local preview" means edits
+             live only in this browser; "Shared" means the owner's changes reach
+             the database and other devices can see them. -->
+        <div class="admin-local-note" id="adminConnectionNote"><span class="admin-connection-dot" aria-hidden="true"></span><span id="adminConnectionLabel">Local preview</span></div>
+        <button type="button" class="admin-action-btn admin-signout" id="adminSignOutBtn" hidden>Sign out</button>
       </aside>
       <div class="admin-content">
+        <!-- THE DOOR. The admin area can read every order and change every price,
+             so it is not reachable until the owner signs in. Everything below is
+             hidden until this gate is passed. -->
+        <section class="admin-gate" id="adminGate">
+          <div class="section-kicker">STORE OWNER</div>
+          <h3>Sign in to your store<span class="brand-dot">.</span></h3>
+          <p class="admin-gate-intro">Orders and catalogue changes are shared through your store database. Enter the store password to continue.</p>
+          <form id="adminLoginForm" class="admin-gate-form" autocomplete="on">
+            <div class="input-groove">
+              <label for="adminPassword">Store password</label>
+              <input type="password" id="adminPassword" name="password" autocomplete="current-password" required>
+            </div>
+            <p class="admin-gate-error" id="adminLoginError" role="alert" hidden></p>
+            <button type="submit" class="checkout-btn" id="adminLoginBtn">Sign in <span aria-hidden="true">→</span></button>
+          </form>
+          <p class="admin-gate-note" id="adminGateNote">The store password is set by whoever deploys this site (the <code>ADMIN_PASSWORD</code> setting). It is not a customer account.</p>
+        </section>
+        <!-- Everything that needs a signed-in owner. -->
+        <div id="adminPanels" hidden>
         <!-- Shown only when saved data existed but could not be read. Without it
              the shop silently reverts to seed data and past orders vanish. -->
         <div class="admin-recovery" id="adminRecovery" role="alert" hidden>
@@ -277,7 +305,7 @@
           <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Reference</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Actions</th></tr></thead><tbody id="adminOrderBody"></tbody></table></div>
           <div class="admin-pager" id="adminOrderPager"></div>
           <div id="orderDetails" class="customer-history" hidden></div>
-          <p class="admin-disclosure">Refunds are recorded locally; no payment is returned.</p>
+          <p class="admin-disclosure">Refunds are recorded against the order; no money is returned automatically. Card refunds must be issued in the payment provider's dashboard.</p>
         </section>
         <section class="admin-panel" id="admin-inventory" hidden>
           <div class="admin-panel-header"><div><div class="section-kicker">STOCK CONTROL</div><h3>Inventory</h3><p>Keep an eye on what is available.</p></div></div>
@@ -334,6 +362,7 @@
         <!-- Lives outside every pager because renderPager rebuilds those containers.
              A live region has to be in the DOM before its text changes, or the
              change is not reliably announced. -->
+        </div>
         <p class="visually-hidden" id="adminListAnnouncer" role="status" aria-live="polite" aria-atomic="true"></p>
       </div>
     </div>
@@ -365,8 +394,10 @@
   <script src="js/contact.js"></script>
   <script src="js/config.js"></script>
   <script src="js/currency.js"></script>
+  <script src="js/search.js"></script>
   <script src="js/products.js"></script>
   <script src="js/store.js"></script>
+  <script src="js/sync.js"></script>
   <script src="js/payments.js"></script>
   <script src="js/app.js"></script>
   <script src="js/legal.js"></script>

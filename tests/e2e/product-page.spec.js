@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { openAdmin, stubAdminSession } = require('./helpers');
 
 // Stand in for a real payment provider. The public key and verify URL are
 // injected because js/config.js deliberately ships them empty.
@@ -34,7 +35,30 @@ async function load(page, path = '/', { currency = 'USD' } = {}) {
   await page.addInitScript(code => {
     try { window.localStorage.setItem('greencart_currency_v1', code); } catch (_) { }
   }, currency);
+  // Admin pages now sit behind a password gate, so stub the session for them.
+  if (path.includes('admin=1')) await stubAdminSession(page);
   await page.goto(path);
+}
+
+// Pass the gate if it is up. A live session goes straight to the panels.
+async function signIn(page) {
+  // Wait until the modal has settled into ONE of its two states, using the DOM's
+  // own `hidden` flags rather than a visibility probe. Probing is a race: during
+  // the opening transition, `isVisible()` can answer false for a panel that is
+  // already un-hidden, and the helper then tries to fill a password field that
+  // lives inside a hidden section (zero-size, so unfillable).
+  await page.waitForFunction(() => {
+    const panels = document.getElementById('adminPanels');
+    const gate = document.getElementById('adminGate');
+    if (!panels || !gate) return false;
+    return !panels.hidden || !gate.hidden;
+  }, null, { timeout: 20000 });
+  const signedIn = await page.evaluate(() => !document.getElementById('adminPanels').hidden);
+  if (signedIn) return;
+
+  await page.locator('#adminPassword').fill('test-password');
+  await page.locator('#adminLoginBtn').click();
+  await page.locator('#adminPanels').waitFor({ state: 'visible', timeout: 20000 });
 }
 
 test('homepage removes the requested hero copy while keeping the featured image', async ({ page }) => {
@@ -110,8 +134,7 @@ test('a missing or out-of-stock product is handled without a broken page', async
   await page.keyboard.press('Enter');
   await expect(page.locator('#catalogSection')).toBeVisible();
   await expect(page.locator('#collectionTitle')).toBeFocused();
-  await page.goto('/?admin=1&product=aura-02');
-  await page.locator('[data-tab="admin"]').click();
+  await openAdmin(page, { path: '/?admin=1&product=aura-02' });
   await page.locator('[data-admin="inventory"]').click();
   const row = page.locator('#adminInventoryBody tr').filter({ hasText: 'Bauhaus Chronograph Mono' });
   await row.locator('input').fill('0');
@@ -203,6 +226,7 @@ test('saved items and bag links open details and availability follows bag change
   await page.locator('#wishlistCloseBtn').click();
   await expect(page.locator('#productSaveBtn')).toHaveAttribute('aria-pressed', 'false');
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="inventory"]').click();
   const row = page.locator('#adminInventoryBody tr').filter({ hasText: 'AURA ANC Over-Ear' });
   await row.locator('input').fill('2');
@@ -226,6 +250,7 @@ test('saved items and bag links open details and availability follows bag change
 test('local admin products have reloadable details without implying they exist on another device', async ({ page, browser }) => {
   await load(page, '/?admin=1');
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="products"]').click();
   await page.locator('#addProductBtn').click();
   await page.locator('#productName').fill('Desk lamp <special>');
@@ -264,6 +289,7 @@ test('product details reflect changes from another tab without losing variant fo
   await expect(other.locator('#productSizePills .size-pill').nth(1)).toBeFocused();
   await expect(other.locator('#productSizePills .size-pill').nth(1)).toHaveAttribute('aria-pressed', 'true');
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="inventory"]').click();
   const row = page.locator('#adminInventoryBody tr').filter({ hasText: 'Bauhaus Chronograph Mono' });
   await row.locator('input').fill('0');

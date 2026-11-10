@@ -135,7 +135,7 @@ img { display: block; max-width: 100%; }
 
 .hero-section { padding: 30px 0 54px; }
 .hero-card { padding: clamp(12px, 1.6vw, 18px); border-radius: 26px; background: var(--bg-card); box-shadow: var(--shadow-flat); }
-.spec-dot, .admin-local-note > span { display: inline-block; width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--black-primary); }
+.spec-dot, .admin-local-note .admin-connection-dot { display: inline-block; width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--black-primary); }
 .nm-btn-black, .checkout-btn, .add-cart-btn { display: inline-flex; align-items: center; justify-content: center; gap: 14px; border-radius: 999px; background: var(--black-primary); color: var(--white-pure); box-shadow: var(--dark-button-shadow); font-weight: 700; transition: box-shadow .2s ease, opacity .2s ease; }
 .nm-btn-black { min-height: 45px; padding: 12px 22px; font-size: .84rem; }
 .nm-btn-black:hover:not(:disabled), .checkout-btn:hover:not(:disabled), .add-cart-btn:hover:not(:disabled) { box-shadow: var(--dark-button-shadow), var(--hover-glow); }
@@ -329,7 +329,7 @@ body.dark-mode .pay-card-pill.active { background: #fff; color: #000; }
 .admin-tab:hover { color: var(--black-primary); box-shadow: var(--hover-glow); }
 .admin-tab.active { background: var(--bg-primary); box-shadow: var(--shadow-inset); color: var(--black-primary); }
 .admin-local-note { display: flex; align-items: center; gap: 8px; margin-top: auto; color: var(--gray-muted); font-size: .67rem; font-weight: 700; }
-.admin-local-note > span { width: 6px; height: 6px; background: var(--success); }
+.admin-local-note .admin-connection-dot { width: 6px; height: 6px; }
 .admin-content { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 42px 34px 40px; }
 .admin-close { top: 18px; right: 25px; }
 .admin-panel-header { display: flex; align-items: end; justify-content: space-between; gap: 20px; min-height: 74px; margin: 0 0 25px; padding-right: 52px; }
@@ -549,7 +549,7 @@ body.dark-mode .theme-notice { background: linear-gradient(90deg, rgba(16, 18, 2
 }
 @media (max-width: 320px) {
   .admin-navigation { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .admin-local-note { display: none; }
+  .admin-local-note { margin-top: 14px; position: static; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
@@ -590,3 +590,40 @@ body.dark-mode .theme-notice { background: linear-gradient(90deg, rgba(16, 18, 2
 .admin-recovery strong { display: block; font-size: .82rem; margin-bottom: 3px; }
 .admin-recovery span { display: block; font-size: .74rem; line-height: 1.5; color: var(--black-secondary); max-width: 62ch; }
 .admin-recovery .admin-action-btn { flex-shrink: 0; }
+
+/* ---------------------------------------------------------------- admin gate */
+/* The sign-in door covers the admin area until the owner is authenticated.
+   Kept deliberately plain: this is a door, not a marketing page. */
+.admin-gate { max-width: 440px; padding: 8px 0 32px; }
+.admin-gate h3 { font-size: 1.6rem; margin: 6px 0 10px; letter-spacing: -.02em; }
+.admin-gate-intro { color: var(--black-secondary); font-size: .92rem; line-height: 1.6; margin-bottom: 22px; }
+.admin-gate-form { display: grid; gap: 16px; }
+.admin-gate-error {
+  margin: 0; padding: 12px 14px; border-radius: 12px;
+  background: rgba(180, 59, 69, .09); color: var(--danger);
+  font-size: .88rem; font-weight: 700;
+}
+.admin-gate-note { margin-top: 20px; font-size: .8rem; line-height: 1.6; color: var(--gray-muted); }
+.admin-gate-note code { font-size: .78rem; padding: 1px 5px; border-radius: 5px; background: rgba(17, 18, 21, .07); }
+.admin-signout { margin-top: 16px; width: 100%; }
+
+/* The connection pill states whether changes are shared or local. It is a fact
+   about the deployment, not a decoration, so it is readable rather than subtle. */
+/* The dot is its own element so a broad `> span` rule cannot turn the label into
+   a dot. It states a fact: green means changes are shared, grey means local. */
+.admin-local-note .admin-connection-dot {
+  display: inline-block; width: 6px; height: 6px; flex: none;
+  border-radius: 50%; background: var(--gray-muted);
+}
+.admin-local-note.is-shared .admin-connection-dot { background: #2f7d4f; }
+.admin-local-note.is-local .admin-connection-dot { background: var(--gray-muted); }
+.admin-local-note #adminConnectionLabel { white-space: nowrap; }
+
+/* A shared order row needs to show that it came from the server, not this
+   browser, because the two are not the same thing. */
+.admin-source-tag {
+  display: inline-block; margin-left: 6px; padding: 2px 7px;
+  border-radius: 999px; font-size: .66rem; font-weight: 800;
+  letter-spacing: .04em; text-transform: uppercase;
+  background: rgba(47, 125, 79, .13); color: #2f7d4f;
+}

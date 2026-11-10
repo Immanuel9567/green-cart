@@ -1,27 +1,31 @@
 # GreenCart storefront
 
-A static storefront with a locally persisted admin preview. Run it from the project directory:
+A storefront with a shared store database and a password-protected admin area. Run it from the project directory:
 
 ```sh
 npm start
 ```
 
-Open `http://localhost:8000` and use **Admin** in the main navigation. Products, bag contents, saved items, promotions, customers, order references, inventory and order statuses are stored in this browser's local storage. Existing `aura_cart` and `aura_wishlist` data are imported on first use.
+Open `http://localhost:8000`. Shoppers browse, search, save items and check out with **pay on delivery**. The owner opens `/?admin=1`, signs in with the store password, and sees real orders.
+
+**The shop works with no configuration at all**, but a customer's order then stays on the customer's own device. Connecting a database is what makes orders reach the owner — see **[docs/GOING-LIVE.md](docs/GOING-LIVE.md)** for the step-by-step version, including the Supabase account and the two environment variables.
+
+Search ranks by relevance over the title, category, specs and description, folds accents, and expands common words: "watch" finds the chronograph, "headphones" the AURA, "coffee" the French press. See `js/search.js`.
 
 All product images are served from `assets/images/` in this repository, so the storefront does not depend on a third-party image host. `tests/store.test.js` fails if a built-in product points at a remote URL or a missing file.
 
-Product images and titles open a full details page at a reloadable URL such as `/?product=aura-01`. The built-in products can be opened from those links in another browser, but locally added or edited products do not sync: a link to a locally added product may show “Product not found” elsewhere, and edits to built-in products remain local.
+Product images and titles open a full details page at a reloadable URL such as `/?product=aura-01`. When the database is connected, a product added in the admin is visible to every visitor at the same link. Without it, a locally added product stays on that browser and the link shows "Product not found" elsewhere.
 
 ## Hosting
 
 The storefront is deployed on Vercel from `main`. The intended public address is **https://shopgreencart.com** (see [docs/GO-LIVE-HOSTING.md](docs/GO-LIVE-HOSTING.md) for the DNS records and who has to add them).
 
-**Card payments are off until an owner supplies a Paystack public key.** The checkout checks this before doing anything and says so plainly; it will not create an order while payments are unavailable. Turning payments on is documented step by step in **[docs/PAYMENTS.md](docs/PAYMENTS.md)**, including creating the Paystack account and where the secret key goes.
+**Card payments are off until an owner supplies a Paystack public key.** Pay on delivery works without one, and the checkout says plainly which methods are available. Turning card payments on is documented step by step in **[docs/PAYMENTS.md](docs/PAYMENTS.md)**.
 
 Three things are true today and are not hidden in the UI:
 
-- **A paid order is recorded only in the buyer's browser.** There is no database, so the seller does not receive it. Until that exists, sales are reconciled from the Paystack dashboard.
-- **The admin is not access-controlled.** It is out of the public nav, but anyone with the URL can open it.
+- **Without `SUPABASE_*` set, an order stays on the buyer's device.** The checkout says so to the customer, the admin panel reads `Local preview`, and the order endpoint answers `persisted: false` rather than pretending to store it.
+- **The admin is password-protected** (`ADMIN_PASSWORD`). It is out of the public nav and the server refuses every admin request without a signed session. There is one password, not a user system.
 - **The legal pages are placeholders.** `legal/` ships with delivery windows and return periods marked for replacement, and the business contact details live in **`js/contact.js`** — one file that feeds the legal pages and the footer. The pages show a red banner naming whatever is still missing, and `tests/legal.test.js` fails once those details are filled in, so the site cannot quietly present itself as finished.
 
 Prices are stored in US dollars and displayed in naira by default, converted at a rate pinned in `js/config.js` with the date it was checked. Conversion never changes a stored price or an order total.
@@ -30,7 +34,10 @@ Promotions can be percentage or fixed-amount codes, or automatic sales with opti
 
 ## Important limitations
 
-- This is not a production admin system: anyone using the page can open Admin, data is not shared between devices, and clearing browser storage removes it. Do not enter real customer or payment information.
+- **There are no customer accounts.** "Account" shows the orders placed in that browser; there is no login, no saved address, and no order lookup by email.
+- **No emails are sent.** The customer sees their reference on screen and nothing else arrives.
+- **Stock is per product, not per variant.** A product has one stock number, not one per colour and size.
+- **Refunds are recorded, not returned.** A refund advances the order's status; the money must be returned through Paystack's dashboard.
 - **Checkout now takes real card payments** when configured, but the resulting order is stored only in the buyer's browser. The payment gateway (`api/`) is real and server-verified; the order system behind it is not built. Refunds recorded in the admin only change a local status; a real refund must be issued from the Paystack dashboard.
 - The price a customer is charged is computed by the server from `js/products.js`, never sent by the browser. See `api/_lib/pricing.js`.
 - Every admin table — Products, Inventory, Orders, Customers and Promotions — **searches, filters and pages** 10 rows at a time, paging is keyboard-usable (focus stays on the pager instead of jumping to the top of the page), and each page change is announced to screen readers; the pager shows the visible range and total. Paging is client-side but returns a server-shaped result (`page`, `pageCount`, `total`), so a real API can replace it without rewriting the tables.

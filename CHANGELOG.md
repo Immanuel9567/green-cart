@@ -2,6 +2,115 @@
 
 This file records meaningful repository changes and the checks that support them. See [agent.md](agent.md) for the required entry and handoff rules. Dates use the owner's local date; `Unreleased` means the work is not yet part of a named release.
 
+## Unreleased — 2026-11-10 (the shop becomes usable)
+
+The previous state was a good-looking storefront that could not take an order. Card
+payments were switched off, so checkout refused; and every order and catalogue edit
+lived only in the visitor's own browser, which meant the owner never saw a customer's
+order and the admin panel was always empty on a different device. This pass fixes
+both, and adds the first real feature the box was missing.
+
+### Added — a search that finds what people type
+
+The old search compared the query against the title, description, category and tags
+with a plain substring test. The catalogue is named by brand and material, so
+**"watch" found nothing** despite a chronograph being on the page, and "headphones"
+found nothing at all.
+
+`js/search.js` replaces it with relevance ranking: weighted fields (title and tags
+above category and specs above description), accent folding so "lumiere" finds
+"Lumière", whole-word prefix matching so "chrono" matches "Chronograph" but "art"
+does not match "cart", AND semantics across tokens so extra words narrow the list,
+and a small synonym table mapping a shopper's word onto words the catalogue already
+contains. The table is data, not inference: nothing invents catalogue copy.
+
+Measured in a browser: `watch` → 2 results, `headphones` → 4, `coffee` → 1 (was 0
+for all three).
+
+### Added — the shared store
+
+- `db/schema.sql` — `shop_state` (one JSON document, one row, optimistic versioning),
+  `orders` (integer kobo and USD cents plus the rate used, so a later rate change
+  cannot rewrite history; denormalised line-item snapshot), `payment_events`
+  (append-only payment audit).
+- `db/index.js` — a Supabase SQL-over-HTTPS runner, so a serverless function needs no
+  connection pool. It refuses to work with half a configuration and never falls back
+  to a local file.
+- `db/state.js` — read/write the storefront document with **optimistic concurrency**.
+  A write carrying a stale version is rejected and told the current version, rather
+  than silently overwriting an edit made on another device.
+- `db/orders.js` — order records with no update path for money and no delete.
+
+### Added — an admin area with a door
+
+- `api/_lib/session.js`, `api/admin-login.js` — the owner's password is exchanged for
+  a signed, expiring token (HMAC-SHA256, constant-time comparison). The cookie is
+  `HttpOnly; SameSite=Strict; Secure` on Vercel, so JavaScript cannot read it and
+  another site cannot act as the owner. Ten wrong passwords per address locks the
+  door for ten minutes.
+- `api/admin/orders.js`, `api/admin/state.js` — read orders and the document; move an
+  order along its fulfilment path. **Every admin endpoint refuses an unauthenticated
+  caller**, and the transition is re-checked server-side, so hiding a button is not
+  what stops "pending → delivered".
+
+### Added — checkout that actually completes
+
+- `api/orders.js` — records a pay-on-delivery order. It **re-prices from the server's
+  own catalogue** and stores the server's figures; the browser's numbers are only
+  compared against, never believed. It cannot mark anything paid: only the payment
+  webhook may do that.
+- Pay on delivery is now the default method and completes an order; Card is still
+  offered and honestly explains that it is not switched on until a key is configured.
+
+### Fixed — a bug that would have made the whole database pointless
+
+`db/index.js` parsed only ONE of the two result shapes the SQL endpoint can return.
+Given a plain array of rows rather than `[{ rows: [...] }]`, it returned nothing — and
+nothing looks exactly like "this shop has no orders". Every order would have been
+stored and every screen would have shown an empty list. Both shapes are now handled
+and the behaviour is tested.
+
+### Fixed — three more found while building
+
+- **The SQL statement splitter ate the schema.** It advanced one character past a
+  two-character `--` opener, so the comment ended immediately; combined with an
+  apostrophe in the prose ("the shop's point of view") the scanner then treated the
+  rest of the file as a string. Only 7 of 7 statements survived by accident, and the
+  two `CREATE TABLE`s did not. Fixed by consuming both characters.
+- **A stale-write limit returned the entire table.** `Number(limit) || 50` treated an
+  explicit `0` as "not supplied". Now absence is checked explicitly.
+- **Admin order totals were converted twice.** The table renders through the display
+  formatter, which treats its input as the base currency; passing it naira produced
+  ₦543,330,218 for a $299 order. It now passes `usd_total_cents`, the figure the
+  schema stores precisely so this cannot happen.
+
+### Changed — what the site says when it cannot do something
+
+- No database configured ⇒ a pay-on-delivery order is reported as **`persisted:
+  false`** and the shopper is told to keep the reference. Never a false claim that an
+  order reached the shop.
+- The admin panel states `Shared store` or `Local preview`, and explains the
+  difference on hover. An owner who thinks a change is shared when it is not will
+  believe their shop has been updated.
+- The refund line said refunds were recorded locally; it now says no money is returned
+  automatically and card refunds must be issued in the provider's dashboard.
+
+### Checks
+
+- `npm test`: **152** tests across ten suites (was 82). New suites: `search` (11),
+  `db` (15), `persistence` (17), `api` (17), `admin` (10).
+- Playwright: **49/49** browser tests.
+- Verified end to end in two separate browser contexts against a real HTTP server and
+  a real database: a shopper places an order, the owner — signed in elsewhere — sees
+  it under Admin → Orders with the correct money.
+
+### Still open
+
+- Card payments need an owner Paystack account; `docs/GOING-LIVE.md` covers it.
+- Contact details and the shipping/returns facts are still placeholders, and the tests
+  fail if the warning is removed without filling them in.
+- Customer accounts, order emails, per-variant stock and refunds-to-card are not built.
+
 ## Unreleased — 2026-11-06 (fix pass)
 
 ### Fixed — the webhook would have rejected every real payment

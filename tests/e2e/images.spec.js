@@ -1,10 +1,32 @@
 const { test, expect } = require('@playwright/test');
+const { openAdmin } = require('./helpers');
+
+// The admin token lives in memory, so a reload closes the door again. Sign back
+// in rather than pretending the door is not there.
+async function signIn(page) {
+  // Wait until the modal has settled into ONE of its two states, using the DOM's
+  // own `hidden` flags rather than a visibility probe. Probing is a race: during
+  // the opening transition, `isVisible()` can answer false for a panel that is
+  // already un-hidden, and the helper then tries to fill a password field that
+  // lives inside a hidden section (zero-size, so unfillable).
+  await page.waitForFunction(() => {
+    const panels = document.getElementById('adminPanels');
+    const gate = document.getElementById('adminGate');
+    if (!panels || !gate) return false;
+    return !panels.hidden || !gate.hidden;
+  }, null, { timeout: 20000 });
+  const signedIn = await page.evaluate(() => !document.getElementById('adminPanels').hidden);
+  if (signedIn) return;
+
+  await page.locator('#adminPassword').fill('test-password');
+  await page.locator('#adminLoginBtn').click();
+  await page.locator('#adminPanels').waitFor({ state: 'visible', timeout: 20000 });
+}
 
 test('uploaded product images survive editing and can be removed', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.addInitScript(() => { try { window.localStorage.setItem('greencart_currency_v1', 'USD'); } catch (_) { } });
-  await page.goto('/?admin=1');
-  await page.locator('[data-tab="admin"]').click();
+  await openAdmin(page, { path: '/?admin=1' });
   await page.locator('[data-admin="products"]').click();
   await page.locator('#addProductBtn').click();
   await page.locator('#productName').fill('Uploaded object');
@@ -30,6 +52,7 @@ test('uploaded product images survive editing and can be removed', async ({ page
   await expect(page.locator('.product-card img')).toHaveAttribute('src', /^data:image\/png;base64,/);
   await page.reload();
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="products"]').click();
   await page.locator('#adminProductSearch').fill('Edited object');
   row = page.locator('#adminProductBody tr').filter({ hasText: 'Edited object' });
@@ -44,8 +67,7 @@ test('uploaded product images survive editing and can be removed', async ({ page
 test('inventory edits update the low-stock alert and product availability', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.addInitScript(() => { try { window.localStorage.setItem('greencart_currency_v1', 'USD'); } catch (_) { } });
-  await page.goto('/?admin=1');
-  await page.locator('[data-tab="admin"]').click();
+  await openAdmin(page, { path: '/?admin=1' });
   await page.locator('[data-admin="inventory"]').click();
   const row = page.locator('#adminInventoryBody tr').filter({ hasText: 'AURA ANC Over-Ear' });
   await row.locator('input').fill('2');
@@ -65,8 +87,7 @@ test('inventory edits update the low-stock alert and product availability', asyn
 test('fixed-amount sales apply automatically and can be disabled', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.addInitScript(() => { try { window.localStorage.setItem('greencart_currency_v1', 'USD'); } catch (_) { } });
-  await page.goto('/?admin=1');
-  await page.locator('[data-tab="admin"]').click();
+  await openAdmin(page, { path: '/?admin=1' });
   await page.locator('[data-admin="discounts"]').click();
   await page.locator('#addPromoBtn').click();
   await page.locator('#promoCode').fill('AUTOSALE');
@@ -97,8 +118,7 @@ test('fixed-amount sales apply automatically and can be disabled', async ({ page
 test('archiving a product retires it from the storefront and keeps it restorable', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.addInitScript(() => { try { window.localStorage.setItem('greencart_currency_v1', 'USD'); } catch (_) { } });
-  await page.goto('/?admin=1');
-  await page.locator('[data-tab="admin"]').click();
+  await openAdmin(page, { path: '/?admin=1' });
   await page.locator('[data-admin="products"]').click();
 
   // Archive the featured product, which is also the hero.
@@ -125,8 +145,7 @@ test('archiving a product retires it from the storefront and keeps it restorable
   await expect(page.locator('#productAddToCart')).toHaveCount(0);
 
   // Restore and confirm it returns with stock intact.
-  await page.goto('/?admin=1');
-  await page.locator('[data-tab="admin"]').click();
+  await openAdmin(page, { path: '/?admin=1' });
   await page.locator('[data-admin="products"]').click();
   await page.locator('[data-product-filter="archived"]').click();
   await page.locator('#adminProductBody tr').filter({ hasText: 'AURA ANC Over-Ear' }).getByRole('button', { name: 'Restore' }).click();

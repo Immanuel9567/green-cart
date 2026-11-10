@@ -96,8 +96,11 @@ function attempt(action) {
 function getFilteredProducts() {
   let products = [...AppStore.availableProducts];
   if (AppStore.activeCategory !== 'all') products = products.filter(product => product.category === AppStore.activeCategory);
-  const query = AppStore.searchQuery.trim().toLowerCase();
-  if (query) products = products.filter(product => [product.title, product.description, product.categoryName, ...(product.tags || [])].some(value => String(value).toLowerCase().includes(query)));
+  const query = AppStore.searchQuery.trim();
+  // Search ranks by relevance (js/search.js). It runs BEFORE the sort, and when
+  // the shopper has picked an explicit sort that choice wins over relevance —
+  // typing "watch" then choosing "price: low to high" must not re-order by score.
+  if (query) products = window.GreenCartSearch.searchProducts(products, query);
   if (AppStore.sortBy === 'price-low') products.sort((a, b) => a.price - b.price);
   if (AppStore.sortBy === 'price-high') products.sort((a, b) => b.price - a.price);
   if (AppStore.sortBy === 'rating') products.sort((a, b) => b.rating - a.rating);
@@ -556,9 +559,76 @@ function refundAction(order) {
   return `<button type="button" class="admin-action-btn danger" data-admin-action="refund" data-reference="${escapeHtml(order.reference)}">Record refund</button>`;
 }
 
+// Orders that came from the SERVER, mapped into the shape the admin table draws.
+//
+// These are the orders the owner actually needs to see: a shopper's order arrives
+// here, not in this browser's localStorage. The local orders stay listed too,
+// because an order placed on this device before the database was connected must
+// still be visible rather than silently disappear.
+let serverOrders = [];
+let serverOrdersState = 'idle'; // 'idle' | 'loading' | 'ready' | 'unavailable' | 'error'
+let serverOrdersMessage = '';
+
+function mapServerOrder(row) {
+  const items = Array.isArray(row.items) ? row.items : [];
+  return {
+    reference: row.reference,
+    createdAt: row.created_at,
+    status: row.status,
+    customer: {
+      name: row.customer_name || 'Customer',
+      email: row.customer_email || '',
+      city: row.customer_city || ''
+    },
+    items,
+    subtotal: 0,
+    discount: 0,
+    shipping: 0,
+    // The admin table renders through money(), which treats its input as the BASE
+    // currency (USD) and converts for display. So the value handed to it must be
+    // the authored dollar figure — `usd_total_cents` — NOT the naira charge.
+    // Using amount_kobo here converted naira to naira a second time and showed an
+    // order of $299 as ₦543,330,218.
+    total: Number(row.usd_total_cents || 0) / 100,
+    payment: { provider: row.payment_provider || '', reference: row.reference, status: row.payment_status || 'none' },
+    fromServer: true
+  };
+}
+
+// Fetch the owner's orders. Called on sign-in and whenever the Orders tab opens.
+async function loadServerOrders(options = {}) {
+  if (!window.GreenCartSync.isSignedIn()) return;
+  serverOrdersState = 'loading';
+  renderAdminOrders();
+  const result = await window.GreenCartSync.fetchOrders(200);
+  if (result.ok) {
+    serverOrders = (result.orders || []).map(mapServerOrder);
+    serverOrdersState = 'ready';
+    serverOrdersMessage = '';
+  } else {
+    serverOrders = [];
+    serverOrdersState = result.reason === 'unavailable' ? 'unavailable' : 'error';
+    serverOrdersMessage = result.message || '';
+    if (!options.quiet && result.reason === 'unauthorised') // A token from earlier in this tab is adopted before the gate is drawn, so a
+// refresh does not force the owner to type their password again.
+window.GreenCartSync.restoreToken(readAdminToken());
+renderAdminAccess();
+if (window.GreenCartSync.isSignedIn()) syncFromServer({ quiet: true }).then(() => renderAdminPanel());
+  }
+  renderAdminConnection();
+  renderAdminOrders();
+  if (options.announce && serverOrdersState === 'ready') {
+    announceListChange('orders', `${serverOrders.length} ${serverOrders.length === 1 ? 'order' : 'orders'} loaded from the shared store.`);
+  }
+}
+
 function renderAdminOrders() {
   const state = adminListState.orders;
-  const matching = AppStore.orders
+  // Server orders first: they are the ones the owner has not seen. A local order
+  // whose reference already came back from the server is not listed twice.
+  const seen = new Set(serverOrders.map(order => order.reference));
+  const combined = [...serverOrders, ...AppStore.orders.filter(order => !seen.has(order.reference))];
+  const matching = combined
     .filter(order => adminOrderFilter === 'all' || order.status === adminOrderFilter)
     .filter(order => matchesQuery(state.query, order.reference, order.customer.name, order.customer.email, titleCase(order.status), order.items.map(item => item.title).join(' ')));
   renderAdminList({
@@ -579,9 +649,14 @@ function renderAdminOrders() {
       <td data-label="Actions"><div class="admin-actions"><button type="button" class="admin-action-btn" data-admin-action="order-details" data-reference="${escapeHtml(order.reference)}">View details</button>${refundAction(order)}</div></td>
     </tr>`;
     },
-    emptyMessage: AppStore.orders.length === 0
-      ? 'No orders yet.'
-      : state.query ? `No orders match \u201c${state.query}\u201d.` : `No ${adminOrderFilter} orders.`,
+    emptyMessage: (() => {
+      if (serverOrdersState === 'loading') return 'Loading orders from the shared store…';
+      if (serverOrdersState === 'unavailable') return 'Orders are not being stored centrally yet, so these are the orders placed in this browser only.';
+      if (serverOrdersState === 'error') return serverOrdersMessage || 'Orders could not be loaded from the shared store.';
+      if (combined.length === 0) return 'No orders yet.';
+      if (state.query) return `No orders match \u201c${state.query}\u201d.`;
+      return `No ${adminOrderFilter} orders.`;
+    })(),
     afterRender: () => {
       const details = $('orderDetails');
       if (!details.hidden && details.dataset.reference) renderOrderDetails(details.dataset.reference);
@@ -832,21 +907,39 @@ function updatePromotionFields() {
 // payments are off would sit in this browser forever, invisible to any seller,
 // so the store says so instead of collecting it.
 
+// Which payment method is selected right now. Read from the pill that is marked
+// as checked, so the form and the checkout logic cannot disagree.
+function selectedPaymentMethod() {
+  const active = document.querySelector('.pay-card-pill[aria-checked="true"]');
+  return active ? String(active.dataset.payment || '') : '';
+}
+
 function renderCheckoutAvailability() {
   const status = GreenCartPayments.status();
   const disclosure = $('checkoutDisclosure');
   const submit = $('confirmPayBtn');
-  if (status.enabled) {
-    // The figure shown here is the shopper's estimate in their chosen currency.
-    // The amount actually charged is computed and confirmed by the server.
-    disclosure.textContent = `You will be charged ${money(AppStore.getCartTotals().total)} by card. Payment is confirmed before your order is accepted.`;
-    disclosure.classList.remove('checkout-disclosure-blocked');
-    submit.disabled = false;
+  const method = selectedPaymentMethod();
+
+  if (method === 'Card') {
+    if (status.enabled) {
+      // The figure shown is the shopper's estimate in their chosen currency. The
+      // amount actually charged is computed and confirmed by the server.
+      disclosure.textContent = `You will be charged ${money(AppStore.getCartTotals().total)} by card. Payment is confirmed before your order is accepted.`;
+      disclosure.classList.remove('checkout-disclosure-blocked');
+    } else {
+      disclosure.textContent = 'Card payments are not switched on yet. Choose "Pay on delivery" to place this order.';
+      disclosure.classList.add('checkout-disclosure-blocked');
+    }
+    submit.textContent = 'Place order →';
+    submit.disabled = false; // still clickable: pressing it explains why, rather than a dead button
     return;
   }
-  disclosure.textContent = 'Card payments are not switched on yet, so orders cannot be placed right now.';
-  disclosure.classList.add('checkout-disclosure-blocked');
-  submit.disabled = false; // still clickable: pressing it explains why, rather than a dead button
+
+  // Pay on delivery: the order is real and recorded, the money arrives later.
+  disclosure.textContent = `You will pay ${money(AppStore.getCartTotals().total)} in cash when your order is delivered.`;
+  disclosure.classList.remove('checkout-disclosure-blocked');
+  submit.textContent = 'Place order →';
+  submit.disabled = false;
 }
 
 // Everything placeOrder checks, checked BEFORE any money moves. If a charge
@@ -889,11 +982,44 @@ async function submitCheckout() {
   const blocked = checkoutPreflight(name, address, city, email);
   if (blocked) { showToast(blocked, true); return; }
 
+  const method = selectedPaymentMethod();
+
+  // PAY ON DELIVERY. The order is created locally, then published to the server so
+  // the owner can actually see it. The two steps are reported separately: an order
+  // that only exists on this device must SAY so rather than looking delivered.
+  if (method !== 'Card') {
+    submit.disabled = true;
+    submit.textContent = 'Placing order…';
+    let order;
+    try {
+      order = AppStore.placeOrder({
+        name, address, city, email,
+        paymentMethod: 'Pay on delivery',
+        payment: { provider: '', reference: '', status: 'none' }
+      });
+    } catch (error) {
+      submit.disabled = false;
+      submit.textContent = 'Place order →';
+      showToast(error.message || 'The order could not be placed.', true);
+      return;
+    }
+    submit.disabled = false;
+    submit.textContent = 'Place order →';
+
+    // showOrderSuccess needs the reference; the server call may change what we say.
+    showOrderSuccess(order.reference, 'delivery', null);
+    refreshStorefront();
+
+    const recorded = await window.GreenCartSync.recordOrder(order);
+    updateOrderSuccessForRecord(recorded);
+    return;
+  }
+
   const status = GreenCartPayments.status();
   if (!status.enabled) {
-    // Do not create the order. Explain, in the checkout, why nothing happened.
+    // Card is selected but not switched on. Do not create the order; explain why.
     renderCheckoutAvailability();
-    showToast('Payments are not switched on yet, so no order was placed.', true);
+    showToast('Card payments are not switched on yet. Choose "Pay on delivery" to place this order.', true);
     $('checkoutDisclosure').focus && $('checkoutDisclosure').focus();
     return;
   }
@@ -955,21 +1081,48 @@ async function submitCheckout() {
     return;
   }
 
-  DOM.orderTrackingNum.textContent = order.reference;
-  if (outcome.status === 'paid') {
-    $('orderSuccessTitle').textContent = 'Order placed.';
-    $('orderSuccessSummary').textContent = 'Your payment was confirmed and your order has been received.';
-    showToast('Payment confirmed');
-  } else {
-    $('orderSuccessTitle').textContent = 'Order received — confirming payment';
-    $('orderSuccessSummary').textContent = `We have your order, but the payment is still being confirmed. Keep this reference and contact the store if you are unsure: ${outcome.reference}`;
-    showToast('Order saved; payment not yet confirmed', true);
-  }
+  showOrderSuccess(order.reference, outcome.status === 'paid' ? 'paid' : 'unverified', outcome.reference);
+  refreshStorefront();
+}
+
+// One place that shows the "thank you" screen, so the three ways an order can be
+// born (paid, unverified card, pay on delivery) cannot drift apart in what they
+// promise the customer.
+function showOrderSuccess(reference, kind, providerReference) {
+  DOM.orderTrackingNum.textContent = reference;
   DOM.checkoutForm.hidden = true;
   DOM.orderSuccessScreen.hidden = false;
   DOM.checkoutModal.setAttribute('aria-labelledby', 'orderSuccessTitle');
-  refreshStorefront();
+
+  if (kind === 'paid') {
+    $('orderSuccessTitle').textContent = 'Order placed.';
+    $('orderSuccessSummary').textContent = 'Your payment was confirmed and your order has been received.';
+    showToast('Payment confirmed');
+  } else if (kind === 'unverified') {
+    $('orderSuccessTitle').textContent = 'Order received — confirming payment';
+    $('orderSuccessSummary').textContent = `We have your order, but the payment is still being confirmed. Keep this reference and contact the store if you are unsure: ${providerReference || reference}`;
+    showToast('Order saved; payment not yet confirmed', true);
+  } else {
+    // Pay on delivery. Said plainly: the order is real, the money is not taken.
+    $('orderSuccessTitle').textContent = 'Order placed.';
+    $('orderSuccessSummary').textContent = 'Your order has been received. You will pay in cash when it is delivered.';
+    showToast('Order placed');
+  }
   $('continueShoppingBtn').focus();
+}
+
+// After a pay-on-delivery order, the server call may not have worked. That must
+// change what the customer is told: an order that exists only in this browser has
+// not reached the shop, and pretending otherwise loses their order silently.
+function updateOrderSuccessForRecord(recorded) {
+  if (!recorded) return;
+  if (recorded.persisted) {
+    $('orderSuccessSummary').textContent = 'Your order has been received and sent to the shop. You will pay in cash when it is delivered.';
+    return;
+  }
+  $('orderSuccessTitle').textContent = 'Order saved — please keep this reference';
+  $('orderSuccessSummary').textContent = `We could not send this order to the shop automatically, so please keep this reference and quote it to us: ${recorded.reference}. ${recorded.message || ''}`.trim();
+  showToast('Order saved on this device only', true);
 }
 
 function initEventListeners() {
@@ -1131,6 +1284,9 @@ function initEventListeners() {
     const opened = { products: renderAdminProducts, orders: renderAdminOrders, inventory: renderAdminInventory,
       customers: renderAdminCustomers, discounts: renderAdminDiscounts }[tab.dataset.admin];
     if (opened) opened();
+    // Opening Orders fetches the owner's real orders. They live on the server, so
+    // re-drawing a cached list would show a stale shop.
+    if (tab.dataset.admin === 'orders') loadServerOrders({ announce: true });
   }));
   document.querySelectorAll('[data-product-filter]').forEach(pill => pill.addEventListener('click', () => {
     adminProductFilter = pill.dataset.productFilter;
@@ -1272,6 +1428,11 @@ function initEventListeners() {
       if (saved) { renderAdminCustomers(); showToast('Customer status updated'); } else renderAdminCustomers();
     }
   });
+  // Admin access. The form is inside the modal, so the listeners are bound once
+  // here rather than when the gate is shown.
+  if ($('adminLoginForm')) $('adminLoginForm').addEventListener('submit', handleAdminLogin);
+  if ($('adminSignOutBtn')) $('adminSignOutBtn').addEventListener('click', handleAdminSignOut);
+
   $('confirmCancel').addEventListener('click', closeConfirmation);
   $('confirmLayer').querySelector('.confirm-backdrop').addEventListener('click', closeConfirmation);
   $('confirmAccept').addEventListener('click', () => { const action = confirmAction; closeConfirmation(); if (action) attempt(action); });
@@ -1315,6 +1476,122 @@ updateThemeControl(savedTheme === 'dark');
 // nav. This is convenience, NOT access control: anyone who knows the URL can
 // still open it. Real authorization needs the server described in
 // docs/PAYMENTS.md, which is why the admin panel is still described as local.
+// ---------------------------------------------------------------- admin access
+//
+// The admin area is no longer a local demo: orders and catalogue changes are
+// shared through the database. So it has a door, and the door is a password the
+// owner sets on the deployment. Until it is passed, the panels do not exist on
+// screen — and the server refuses every request anyway, which is the part that
+// actually matters.
+
+// Remembered so a refresh does not force a re-login during the same tab session.
+// sessionStorage, not localStorage: closing the tab ends the session, which is
+// what an owner expects on a shared computer.
+const ADMIN_TOKEN_KEY = 'greencart_admin_token_v1';
+
+function readAdminToken() {
+  try { return window.sessionStorage.getItem(ADMIN_TOKEN_KEY) || ''; } catch (_) { return ''; }
+}
+
+function writeAdminToken(token) {
+  try {
+    if (token) window.sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
+    else window.sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch (_) { /* private mode: the session simply will not survive a refresh */ }
+}
+
+// Show the gate or the panels. Called on load and after a successful sign-in.
+function renderAdminAccess() {
+  const signedIn = window.GreenCartSync.isSignedIn();
+  const gate = $('adminGate');
+  const panels = $('adminPanels');
+  const signOut = $('adminSignOutBtn');
+  if (gate) gate.hidden = signedIn;
+  if (panels) panels.hidden = !signedIn;
+  if (signOut) signOut.hidden = !signedIn;
+  renderAdminConnection();
+}
+
+// Say plainly whether what the owner does here is shared or local. This is the
+// single most important fact on the admin screen: an owner who thinks a change is
+// shared when it is not will believe their shop has been updated.
+function renderAdminConnection() {
+  const note = $('adminConnectionNote');
+  const label = $('adminConnectionLabel');
+  if (!note || !label) return;
+  const shared = window.GreenCartSync.isSignedIn() && window.GreenCartSync.isAvailable();
+  note.classList.toggle('is-shared', shared);
+  note.classList.toggle('is-local', !shared);
+  label.textContent = shared ? 'Shared store' : 'Local preview';
+  note.title = shared
+    ? 'Orders and catalogue changes are stored in the shared database, so other devices see them.'
+    : 'Changes and orders are saved in this browser only. Connect the store database to share them.';
+}
+
+async function handleAdminLogin(event) {
+  if (event) event.preventDefault();
+  const input = $('adminPassword');
+  const error = $('adminLoginError');
+  const button = $('adminLoginBtn');
+  if (!input || !button) return;
+
+  const password = input.value;
+  if (!password) return;
+
+  error.hidden = true;
+  button.disabled = true;
+  button.textContent = 'Signing in…';
+
+  const result = await window.GreenCartSync.signIn(password);
+  button.disabled = false;
+  button.innerHTML = 'Sign in <span aria-hidden="true">→</span>';
+
+  if (!result.ok) {
+    error.textContent = result.message || 'That password is not correct.';
+    error.hidden = false;
+    input.select();
+    return;
+  }
+
+  // The token is held in memory by the sync module; mirror it into sessionStorage
+  // so a refresh in the same tab does not demand the password again.
+  writeAdminToken(result.token || '');
+  input.value = '';
+  renderAdminAccess();
+  // Pull the shared document so the owner edits the real catalogue, not whatever
+  // this browser happened to hold.
+  await syncFromServer({ quiet: true });
+  renderAdminPanel();
+  $('adminTitle') && $('adminTitle').focus();
+}
+
+function handleAdminSignOut() {
+  window.GreenCartSync.signOut();
+  writeAdminToken('');
+  renderAdminAccess();
+  showToast('Signed out of the admin area');
+}
+
+// Read the shared document and adopt it if this browser is behind. Called after
+// sign-in and on demand. Never clobbers a local document with an older one.
+async function syncFromServer(options = {}) {
+  const result = await window.GreenCartSync.pullState();
+  renderAdminConnection();
+  if (!result.ok) {
+    if (!options.quiet) showToast(result.message || 'The shared shop could not be read.', true);
+    return result;
+  }
+  if (!result.doc) {
+    // Nothing is stored yet. This browser's catalogue becomes the shared one on
+    // the next save, which is the right starting point for a new shop.
+    return result;
+  }
+  AppStore.adoptSharedState(result.doc);
+  refreshStorefront();
+  if (!options.quiet) showToast('Loaded the shared shop');
+  return result;
+}
+
 function applyAdminVisibility() {
   const wantsAdmin = new URLSearchParams(window.location.search).get('admin') === '1';
   if (wantsAdmin) {
@@ -1325,6 +1602,10 @@ function applyAdminVisibility() {
 
 renderCurrencyControl();
 applyAdminVisibility();
+// The admin gate starts closed unless a token survived a refresh in this tab.
+// Showing the panels before that check would flash the store's data at whoever
+// is at the keyboard, which is not what a closed door looks like.
+renderAdminAccess();
 renderProductGrid();
 renderCartDrawer();
 initSortDropdown();

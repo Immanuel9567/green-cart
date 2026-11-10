@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { openAdmin } = require('./helpers');
 
 // These tests cover what the store's own defaults do. Other spec files pin USD
 // because they assert cent-level arithmetic; the shipped default is naira, and
@@ -78,6 +79,9 @@ test('switching currency never changes what an order is worth', async ({ page })
   await page.locator('.product-card').first().getByRole('button', { name: 'Add to bag' }).click();
   await page.locator('[data-tab="cart"]').click();
   await page.locator('#checkoutTriggerBtn').click();
+  // This spec exercises the CARD path (it stubs Paystack), and pay on delivery is
+  // now the default, so choose card explicitly.
+  await page.locator('.pay-card-pill[data-payment="Card"]').click();
   await page.locator('#checkoutName').fill('Ada Customer');
   await page.locator('#checkoutAddress').fill('1 Main Street');
   await page.locator('#checkoutCity').fill('Port Harcourt');

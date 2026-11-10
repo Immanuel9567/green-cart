@@ -77,6 +77,36 @@ const cases = [
     to: `lowStock: this.products.filter(product => product.stock < 5).length`
   },
   {
+    name: 'unreadable saved data is discarded silently',
+    file: 'js/store.js',
+    from: `      const unreadable = saved === null || typeof saved !== 'object';`,
+    to: `      const unreadable = false;`
+  },
+  {
+    name: 'a first visit is mistaken for unreadable saved data',
+    file: 'js/store.js',
+    from: `    if (raw !== null) {`,
+    to: `    if (true) {`
+  },
+  {
+    name: 'the recovery banner is never shown',
+    file: 'js/app.js',
+    from: `  banner.hidden = false;`,
+    to: `  banner.hidden = true;`
+  },
+  {
+    name: 'a save under the old brand key is ignored',
+    file: 'js/store.js',
+    from: `      const legacyKey = LEGACY_STORE_STATE_KEYS.find(key => this.readRaw(key) !== null);`,
+    to: `      const legacyKey = undefined;`
+  },
+  {
+    name: 'a legacy save overrides the current one',
+    file: 'js/store.js',
+    from: `    if (this.readRaw(STORE_STATE_KEY) === null) {`,
+    to: `    if (true) {`
+  },
+  {
     name: 'empty rows hard-code five columns, whatever the table has',
     file: 'js/app.js',
     from: `    const columns = body.closest('table').querySelectorAll('thead th').length;`,
@@ -159,6 +189,70 @@ const cases = [
     file: 'js/store.js',
     from: `    if (quantity > available) throw new Error(available > 0 ? \`Only \${available} more available.\` : 'No more of this item are available.');`,
     to: ``
+  },
+  {
+    name: 'naira prices are converted without the pinned rate',
+    file: 'js/currency.js',
+    from: `    return value * rate;`,
+    to: `    return value;`
+  },
+  {
+    name: 'a payment is marked paid without asking the server',
+    file: 'js/payments.js',
+    from: `                if (result.verified) {`,
+    to: `                if (true) {`
+  },
+  {
+    name: 'checkout proceeds even though payments are switched off',
+    file: 'js/app.js',
+    from: `  if (!status.enabled) {`,
+    to: `  if (false) {`
+  },
+  {
+    name: 'dollars are turned into kobo without going through naira',
+    file: 'api/_lib/pricing.js',
+    from: `  return Math.round(Number(usdAmount) * NGN_PER_USD * 100);`,
+    to: `  return Math.round(Number(usdAmount) * 100);`
+  },
+  {
+    name: 'the webhook accepts a request with no valid signature',
+    file: 'api/paystack-webhook.js',
+    from: `  if (!authentic) {`,
+    to: `  if (false) {`
+  },
+  {
+    name: 'verification accepts an amount different from the quote',
+    file: 'api/verify-payment.js',
+    from: `  if (Number.isFinite(expectedKobo) && expectedKobo > 0 && Number(transaction.amount) !== expectedKobo) {`,
+    to: `  if (false) {`
+  },
+  {
+    name: 'a secret key pasted into the public config is shipped anyway',
+    file: 'js/payments.js',
+    from: `    if (keyLooksSecret(PUBLIC_KEY)) {
+      return { enabled: false, reason: 'secret-key-in-config' };
+    }`,
+    to: ''
+  },
+  {
+    name: 'the webhook trusts a parsed body instead of the signed bytes',
+    file: 'api/paystack-webhook.js',
+    from: `    event = JSON.parse(rawBody);`,
+    to: `    event = request.body;`
+  },
+  {
+    name: 'a payment is confirmed without checking the amount matches the quote',
+    file: 'api/verify-payment.js',
+    from: `  if (Number.isFinite(expectedKobo) && expectedKobo > 0 && Number(transaction.amount) !== expectedKobo) {`,
+    to: `  if (false) {`
+  },
+  {
+    name: 'the legal pages present themselves as finished while details are placeholders',
+    file: 'js/legal.js',
+    from: `  document.querySelectorAll('[data-contact-warning]').forEach(warning => {
+    if (!missing.length) {`,
+    to: `  document.querySelectorAll('[data-contact-warning]').forEach(warning => {
+    if (true) {`
   }
 ];
 

@@ -2,7 +2,8 @@ const { test, expect } = require('@playwright/test');
 
 test('uploaded product images survive editing and can be removed', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/');
+  await page.addInitScript(() => { try { window.localStorage.setItem('greencart_currency_v1', 'USD'); } catch (_) { } });
+  await page.goto('/?admin=1');
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="products"]').click();
   await page.locator('#addProductBtn').click();
@@ -42,7 +43,8 @@ test('uploaded product images survive editing and can be removed', async ({ page
 
 test('inventory edits update the low-stock alert and product availability', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/');
+  await page.addInitScript(() => { try { window.localStorage.setItem('greencart_currency_v1', 'USD'); } catch (_) { } });
+  await page.goto('/?admin=1');
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="inventory"]').click();
   const row = page.locator('#adminInventoryBody tr').filter({ hasText: 'AURA ANC Over-Ear' });
@@ -62,7 +64,8 @@ test('inventory edits update the low-stock alert and product availability', asyn
 
 test('fixed-amount sales apply automatically and can be disabled', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/');
+  await page.addInitScript(() => { try { window.localStorage.setItem('greencart_currency_v1', 'USD'); } catch (_) { } });
+  await page.goto('/?admin=1');
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="discounts"]').click();
   await page.locator('#addPromoBtn').click();
@@ -93,7 +96,8 @@ test('fixed-amount sales apply automatically and can be disabled', async ({ page
 
 test('archiving a product retires it from the storefront and keeps it restorable', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/');
+  await page.addInitScript(() => { try { window.localStorage.setItem('greencart_currency_v1', 'USD'); } catch (_) { } });
+  await page.goto('/?admin=1');
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="products"]').click();
 
@@ -115,13 +119,13 @@ test('archiving a product retires it from the storefront and keeps it restorable
   // Storefront no longer lists it, and its old URL says it is retired.
   await expect(page.locator('#productGrid a[data-product-link="aura-01"]')).toHaveCount(0);
   await expect(page.locator('#resultsCount')).toContainText('Showing 13 objects');
-  await page.goto('/?product=aura-01');
+  await page.goto('/?admin=1&product=aura-01');
   await expect(page.locator('#productPageContent')).toContainText('No longer available');
   await expect(page.locator('#productPageContent')).not.toContainText('Product not found');
   await expect(page.locator('#productAddToCart')).toHaveCount(0);
 
   // Restore and confirm it returns with stock intact.
-  await page.goto('/');
+  await page.goto('/?admin=1');
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="products"]').click();
   await page.locator('[data-product-filter="archived"]').click();

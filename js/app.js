@@ -12,7 +12,10 @@ const DOM = {
   adminModal: $('adminModal'), toastContainer: $('toastContainer'), themeNotice: $('themeNotice'), themeToggleBtn: $('themeToggleBtn'), themeToggleLabel: $('themeToggleLabel')
 };
 
-const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value) || 0);
+// All money on screen goes through the currency layer, so the USD -> NGN choice
+// applies everywhere at once and nowhere formats a price on its own. Prices are
+// stored in USD; only the rendering changes.
+const money = value => window.GreenCartCurrency.format(value);
 const escapeHtml = value => String(value == null ? '' : value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const titleCase = value => String(value || '').replace(/\b\w/g, char => char.toUpperCase());
 const formatDate = value => {
@@ -106,6 +109,7 @@ function renderProductGrid() {
   $('featuredHero').hidden = !featured;
   if (featured) {
     $('featuredPrice').textContent = money(featured.price);
+    $('featuredCurrency').textContent = GreenCartCurrency.get();
     $('featuredProductLink').setAttribute('aria-label', `View ${featured.title}`);
     const image = $('featuredProductImage');
     const source = imageSource(featured);
@@ -226,10 +230,10 @@ function renderProductPage(productId) {
   const focusSize = focused && focused.dataset.size;
   const product = AppStore.products.find(item => item.id === productId);
   if (product && product.archived) {
-    document.title = "No longer available | V8's";
+    document.title = "No longer available | GreenCart";
     DOM.productPageContent.innerHTML = `<div class="product-missing"><div class="section-kicker">THE COLLECTION</div><h1 id="productPageTitle" tabindex="-1">No longer available<span class="brand-dot">.</span></h1><p>${escapeHtml(product.title)} has been retired and is not for sale. Past orders that included it keep their details in your account.</p><a class="nm-btn" href="./#catalogSection" data-storefront-link="shop">Back to the collection</a></div>`;
   } else if (!product) {
-    document.title = "Product not found | V8's";
+    document.title = "Product not found | GreenCart";
     DOM.productPageContent.innerHTML = `<div class="product-missing"><div class="section-kicker">THE COLLECTION</div><h1 id="productPageTitle" tabindex="-1">Product not found<span class="brand-dot">.</span></h1><p>This item may no longer be available on this device.</p></div>`;
   } else {
     if (productSelection.id !== product.id) productSelection = { id: product.id, color: product.colors[0], size: product.sizes[0], quantity: 1 };
@@ -237,7 +241,7 @@ function renderProductPage(productId) {
     if (!product.sizes.includes(productSelection.size)) productSelection.size = product.sizes[0];
     const saved = AppStore.isWishlisted(product.id);
     const specs = Array.isArray(product.specs) ? product.specs.filter(spec => spec && spec.label != null && spec.value != null && String(spec.label).trim() && String(spec.value).trim()) : [];
-    document.title = `${product.title} | V8's`;
+    document.title = `${product.title} | GreenCart`;
     DOM.productPageContent.innerHTML = `<article class="product-detail-card">
       <div class="product-detail-img-well">${productImage(product, 'product-detail-img')}</div>
       <div class="product-detail-body">
@@ -267,7 +271,7 @@ function renderRoute() {
   DOM.productPage.hidden = !viewingProduct;
   $('brandLogo').setAttribute('href', viewingProduct ? './' : '#home');
   if (viewingProduct) renderProductPage(productRouteId());
-  else document.title = "V8's | Objects for everyday living";
+  else document.title = "GreenCart | Everyday essentials, considered";
   setActiveNav(viewingProduct || window.location.hash === '#catalogSection' ? 'shop' : 'home');
 }
 
@@ -374,7 +378,20 @@ function selectPayment(button) {
   });
 }
 
+// Show the recovery notice when saved data existed but could not be read. The
+// message says plainly that what follows is seed data, because the alternative
+// is a shop that looks fine while silently missing the customer's orders.
+function renderAdminRecovery() {
+  const banner = $('adminRecovery');
+  if (!banner) return;
+  const recovery = AppStore.recovery;
+  if (!recovery || recovery.dismissed) { banner.hidden = true; return; }
+  banner.hidden = false;
+  $('adminRecoveryDetail').textContent = `The catalogue and orders below are the built-in defaults, not your saved data (${recovery.bytes} bytes stored). Nothing has been overwritten yet: saving any change will replace it.`;
+}
+
 function renderAdminPanel() {
+  renderAdminRecovery();
   renderAdminAnalytics();
   renderAdminProducts();
   renderAdminOrders();
@@ -732,6 +749,26 @@ function refreshStorefront() {
   if (activeLayer === DOM.wishlistModal) renderWishlistModal();
 }
 
+// Repaint every price after the display currency changes. Stored prices and
+// order totals are untouched; this only re-renders the same numbers into a
+// different currency.
+function renderCurrencyControl() {
+  const code = GreenCartCurrency.get();
+  $('currencyToggleSymbol').textContent = GreenCartCurrency.symbols[code];
+  $('currencyToggleLabel').textContent = code;
+  $('currencyToggleBtn').setAttribute('aria-label', `Switch currency. Prices currently shown in ${code === 'NGN' ? 'Nigerian naira' : 'US dollars'}.`);
+}
+
+function refreshCurrencyEverywhere() {
+  renderCurrencyControl();
+  renderProductGrid();
+  renderCartDrawer();
+  renderProfile();
+  if (isProductRoute()) renderProductPage(productRouteId());
+  if (activeLayer === DOM.wishlistModal) renderWishlistModal();
+  if (activeLayer === DOM.adminModal) renderAdminPanel();
+}
+
 function initSortDropdown() {
   const trigger = $('sortTrigger');
   const menu = $('sortMenu');
@@ -779,6 +816,160 @@ function updatePromotionFields() {
   input.step = isAmount ? '0.01' : '1';
   if (isAmount) input.removeAttribute('max');
   else input.max = '100';
+}
+
+
+// ---------------------------------------------------------------------------
+// Checkout
+// ---------------------------------------------------------------------------
+// The checkout has three honest states and no fourth:
+//
+//   ready      a payment provider is configured; a real charge can be taken
+//   disabled   no provider configured; the form refuses to submit an order
+//   unverified a charge may have happened but no server confirmed it
+//
+// There is deliberately no "pretend it worked" state. An order created while
+// payments are off would sit in this browser forever, invisible to any seller,
+// so the store says so instead of collecting it.
+
+function renderCheckoutAvailability() {
+  const status = GreenCartPayments.status();
+  const disclosure = $('checkoutDisclosure');
+  const submit = $('confirmPayBtn');
+  if (status.enabled) {
+    // The figure shown here is the shopper's estimate in their chosen currency.
+    // The amount actually charged is computed and confirmed by the server.
+    disclosure.textContent = `You will be charged ${money(AppStore.getCartTotals().total)} by card. Payment is confirmed before your order is accepted.`;
+    disclosure.classList.remove('checkout-disclosure-blocked');
+    submit.disabled = false;
+    return;
+  }
+  disclosure.textContent = 'Card payments are not switched on yet, so orders cannot be placed right now.';
+  disclosure.classList.add('checkout-disclosure-blocked');
+  submit.disabled = false; // still clickable: pressing it explains why, rather than a dead button
+}
+
+// Everything placeOrder checks, checked BEFORE any money moves. If a charge
+// succeeds and then order creation fails, the customer has paid for nothing and
+// the store has no record — so the cheap checks all run first.
+function checkoutPreflight(name, address, city, email) {
+  if (!AppStore.cart.length) return 'Your bag is empty.';
+  if (!name || !address || !city) return 'Complete your delivery details.';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a valid email address.';
+  if (AppStore.state.customerStatuses[email] === 'blocked') return 'This customer account is currently blocked.';
+  const stale = AppStore.cart.find(item => {
+    const product = AppStore.products.find(p => p.id === item.id);
+    return !product || AppStore.quantityInCart(item.id) > product.stock;
+  });
+  if (stale) return 'The available stock has changed. Review your bag.';
+  return '';
+}
+
+// A charge that succeeded while order creation failed must not vanish. Keep the
+// provider reference so the shopper can quote it and the store can reconcile it.
+function recordStrandedPayment(reference, reason) {
+  try {
+    const key = 'greencart_stranded_payments_v1';
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    existing.unshift({ reference: reference, reason: reason, at: new Date().toISOString() });
+    localStorage.setItem(key, JSON.stringify(existing.slice(0, 20)));
+  } catch (_) {
+    // If even this fails there is nothing further the browser can do; the
+    // message below still carries the reference to the screen.
+  }
+}
+
+async function submitCheckout() {
+  const name = $('checkoutName').value.trim();
+  const address = $('checkoutAddress').value.trim();
+  const city = $('checkoutCity').value.trim();
+  const email = $('checkoutEmail').value.trim().toLowerCase();
+  const submit = $('confirmPayBtn');
+
+  const blocked = checkoutPreflight(name, address, city, email);
+  if (blocked) { showToast(blocked, true); return; }
+
+  const status = GreenCartPayments.status();
+  if (!status.enabled) {
+    // Do not create the order. Explain, in the checkout, why nothing happened.
+    renderCheckoutAvailability();
+    showToast('Payments are not switched on yet, so no order was placed.', true);
+    $('checkoutDisclosure').focus && $('checkoutDisclosure').focus();
+    return;
+  }
+
+  // Send WHAT is being bought, not what it costs. The server prices the order,
+  // so a tampered browser cannot buy a ₦403,058 item for ₦100.
+  const lines = AppStore.cart.map(item => ({ id: item.id, quantity: item.quantity }));
+  submit.disabled = true;
+  submit.textContent = 'Contacting payment…';
+  let outcome;
+  try {
+    outcome = await GreenCartPayments.charge({
+      lines,
+      promo: AppStore.state.appliedPromo || '',
+      email,
+      customer: { name, city }
+    });
+  } catch (error) {
+    outcome = { status: 'failed', reason: error.message || 'The payment could not be started.' };
+  } finally {
+    submit.disabled = false;
+    submit.textContent = 'Place order →';
+  }
+
+  if (outcome.status === 'abandoned') {
+    showToast('Payment cancelled. Your bag is saved and no charge was made.', true);
+    return;
+  }
+
+  if (outcome.status === 'failed') {
+    const reason = outcome.reason === 'payments-disabled'
+      ? 'Payments are not switched on yet, so no order was placed.'
+      : outcome.reason || 'The payment could not be completed.';
+    showToast(reason, true);
+    return;
+  }
+
+  // 'paid' or 'unverified'. Both mean money may have moved, so both record the
+  // order — losing a paid order is worse than recording an unconfirmed one.
+  const order = attempt(() => AppStore.placeOrder({
+    name, address, city, email,
+    paymentMethod: 'Card',
+    payment: {
+      provider: 'paystack',
+      reference: outcome.reference || '',
+      status: outcome.status === 'paid' ? 'paid' : 'unverified'
+    }
+  }));
+
+  if (!order) {
+    recordStrandedPayment(outcome.reference, outcome.reason || 'order creation failed');
+    $('orderSuccessTitle').textContent = 'Payment received — contact us';
+    $('orderSuccessSummary').textContent = `Your payment reference is ${outcome.reference}. We could not record the order automatically, so please send this reference to the store and we will complete it.`;
+    DOM.orderTrackingNum.textContent = outcome.reference || '—';
+    DOM.checkoutForm.hidden = true;
+    DOM.orderSuccessScreen.hidden = false;
+    DOM.checkoutModal.setAttribute('aria-labelledby', 'orderSuccessTitle');
+    $('continueShoppingBtn').focus();
+    return;
+  }
+
+  DOM.orderTrackingNum.textContent = order.reference;
+  if (outcome.status === 'paid') {
+    $('orderSuccessTitle').textContent = 'Order placed.';
+    $('orderSuccessSummary').textContent = 'Your payment was confirmed and your order has been received.';
+    showToast('Payment confirmed');
+  } else {
+    $('orderSuccessTitle').textContent = 'Order received — confirming payment';
+    $('orderSuccessSummary').textContent = `We have your order, but the payment is still being confirmed. Keep this reference and contact the store if you are unsure: ${outcome.reference}`;
+    showToast('Order saved; payment not yet confirmed', true);
+  }
+  DOM.checkoutForm.hidden = true;
+  DOM.orderSuccessScreen.hidden = false;
+  DOM.checkoutModal.setAttribute('aria-labelledby', 'orderSuccessTitle');
+  refreshStorefront();
+  $('continueShoppingBtn').focus();
 }
 
 function initEventListeners() {
@@ -900,6 +1091,7 @@ function initEventListeners() {
     DOM.orderSuccessScreen.hidden = true;
     DOM.checkoutModal.setAttribute('aria-labelledby', 'checkoutTitle');
     selectPayment(document.querySelector('.pay-card-pill'));
+    renderCheckoutAvailability();
     openLayer(DOM.checkoutModal);
   });
   const paymentButtons = Array.from(document.querySelectorAll('.pay-card-pill'));
@@ -915,21 +1107,19 @@ function initEventListeners() {
   });
   DOM.checkoutForm.addEventListener('submit', event => {
     event.preventDefault();
-    const order = attempt(() => AppStore.placeOrder({ name: $('checkoutName').value, address: $('checkoutAddress').value, city: $('checkoutCity').value, email: $('checkoutEmail').value, paymentMethod: document.querySelector('.pay-card-pill.active').dataset.payment }));
-    if (!order) return;
-    DOM.orderTrackingNum.textContent = order.reference;
-    DOM.checkoutForm.hidden = true;
-    DOM.orderSuccessScreen.hidden = false;
-    DOM.checkoutModal.setAttribute('aria-labelledby', 'orderSuccessTitle');
-    refreshStorefront();
-    $('continueShoppingBtn').focus();
-    showToast('Order saved');
+    submitCheckout();
   });
   $('continueShoppingBtn').addEventListener('click', () => goToStorefront('home'));
+  $('currencyToggleBtn').addEventListener('click', () => {
+    const code = GreenCartCurrency.toggle();
+    refreshCurrencyEverywhere();
+    renderCheckoutAvailability();
+    showToast(`Prices now in ${code === 'NGN' ? 'naira' : 'US dollars'}`);
+  });
   DOM.themeToggleBtn.addEventListener('click', () => {
     const isDark = document.body.classList.toggle('dark-mode');
     updateThemeControl(isDark);
-    try { localStorage.setItem('aura_theme', isDark ? 'dark' : 'light'); } catch (_) { }
+    try { localStorage.setItem('greencart_theme', isDark ? 'dark' : 'light'); } catch (_) { }
     showThemeNotice(isDark);
   });
   document.querySelectorAll('.admin-tab').forEach(tab => tab.addEventListener('click', () => {
@@ -987,6 +1177,11 @@ function initEventListeners() {
     // renderPager restores focus itself when the pager owned it, so clicks and
     // re-renders from other actions are handled by the same path.
     rerender();
+  });
+  $('adminRecoveryDismiss').addEventListener('click', () => {
+    if (AppStore.recovery) AppStore.recovery.dismissed = true;
+    renderAdminRecovery();
+    showToast('Saved data was left untouched; it will be replaced when you save a change.');
   });
   $('addProductBtn').addEventListener('click', () => openProductEditor(null));
   $('cancelProductEdit').addEventListener('click', () => { $('adminProductEditor').hidden = true; });
@@ -1113,9 +1308,23 @@ function updateThemeControl(isDark) {
 }
 
 let savedTheme = 'light';
-try { savedTheme = localStorage.getItem('aura_theme') || 'light'; } catch (_) { }
+try { savedTheme = localStorage.getItem('greencart_theme') || localStorage.getItem('aura_theme') || 'light'; } catch (_) { }
 document.body.classList.toggle('dark-mode', savedTheme === 'dark');
 updateThemeControl(savedTheme === 'dark');
+// The owner reaches the admin with ?admin=1 now that it is out of the public
+// nav. This is convenience, NOT access control: anyone who knows the URL can
+// still open it. Real authorization needs the server described in
+// docs/PAYMENTS.md, which is why the admin panel is still described as local.
+function applyAdminVisibility() {
+  const wantsAdmin = new URLSearchParams(window.location.search).get('admin') === '1';
+  if (wantsAdmin) {
+    const adminTab = document.querySelector('.site-nav-link[data-tab="admin"]');
+    if (adminTab) adminTab.hidden = false;
+  }
+}
+
+renderCurrencyControl();
+applyAdminVisibility();
 renderProductGrid();
 renderCartDrawer();
 initSortDropdown();

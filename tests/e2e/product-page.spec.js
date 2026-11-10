@@ -1,8 +1,39 @@
 const { test, expect } = require('@playwright/test');
 
-async function load(page, path = '/') {
+// Stand in for a real payment provider. The public key and verify URL are
+// injected because js/config.js deliberately ships them empty.
+async function stubPayments(page) {
+  await page.addInitScript(() => {
+    window.GREENCART_CONFIG = {
+      payments: { publicKey: 'pk_test_e2e' }
+    };
+    window.PaystackPop = {
+      setup(options) {
+        return { openIframe() { Promise.resolve().then(() => options.callback({ reference: 'PSK-E2E' })); } };
+      }
+    };
+  });
+  await page.route('**/api/initialize-payment', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, reference: 'PSK-E2E', amount: 40305798, currency: 'NGN' })
+  }));
+  await page.route('**/api/verify-payment', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, reference: 'PSK-E2E', amountKobo: 40305798 })
+  }));
+}
+
+async function load(page, path = '/', { currency = 'USD' } = {}) {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.route('https://images.unsplash.com/**', route => route.abort());
+  // These tests assert dollar arithmetic (a cent-scale rounding bug, a $17
+  // discount). Pinning USD keeps that readable; the shipped naira default and
+  // the currency switch are covered in currency.spec.js.
+  await page.addInitScript(code => {
+    try { window.localStorage.setItem('greencart_currency_v1', code); } catch (_) { }
+  }, currency);
   await page.goto(path);
 }
 
@@ -79,7 +110,7 @@ test('a missing or out-of-stock product is handled without a broken page', async
   await page.keyboard.press('Enter');
   await expect(page.locator('#catalogSection')).toBeVisible();
   await expect(page.locator('#collectionTitle')).toBeFocused();
-  await page.goto('/?product=aura-02');
+  await page.goto('/?admin=1&product=aura-02');
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="inventory"]').click();
   const row = page.locator('#adminInventoryBody tr').filter({ hasText: 'Bauhaus Chronograph Mono' });
@@ -159,7 +190,7 @@ test('product links support keyboard activation, new tabs, and forward navigatio
 });
 
 test('saved items and bag links open details and availability follows bag changes', async ({ page }) => {
-  await load(page);
+  await load(page, '/?admin=1');
   const first = page.locator('.product-card').first();
   await first.getByRole('button', { name: /Save AURA ANC/ }).click();
   await page.locator('[data-tab="wishlist"]').click();
@@ -193,7 +224,7 @@ test('saved items and bag links open details and availability follows bag change
 });
 
 test('local admin products have reloadable details without implying they exist on another device', async ({ page, browser }) => {
-  await load(page);
+  await load(page, '/?admin=1');
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="products"]').click();
   await page.locator('#addProductBtn').click();
@@ -221,7 +252,8 @@ test('local admin products have reloadable details without implying they exist o
 });
 
 test('product details reflect changes from another tab without losing variant focus', async ({ page, context }) => {
-  await load(page, '/?product=aura-02');
+  // The driving tab needs admin access; the observed tab is a shopper's view.
+  await load(page, '/?admin=1&product=aura-02');
   const other = await context.newPage();
   await load(other, '/?product=aura-02');
   const selected = other.locator('#productSizePills .size-pill').nth(1);
@@ -281,6 +313,7 @@ test('featured hero metadata stays legible without overlapping on a narrow scree
 });
 
 test('a detail-page purchase retains the chosen variant through checkout and returns home', async ({ page }) => {
+  await stubPayments(page);
   await load(page, '/?product=aura-03');
   await page.locator('#productColorSwatches .color-swatch').nth(1).click();
   await page.getByRole('button', { name: 'US 9', exact: true }).click();
@@ -292,8 +325,12 @@ test('a detail-page purchase retains the chosen variant through checkout and ret
   await page.locator('#checkoutCity').fill('Ibadan');
   await page.locator('#checkoutEmail').fill('ada@example.com');
   await page.locator('#confirmPayBtn').click();
+  // Checkout is asynchronous now (charge, then server verification, then the
+  // order is saved). Wait for the success screen instead of reading storage
+  // mid-flight and racing the save.
+  await expect(page.locator('#orderSuccessScreen')).toBeVisible();
   const reference = (await page.locator('#orderTrackingNum').textContent()).trim();
-  const item = await page.evaluate(() => JSON.parse(localStorage.getItem('v8_store_v1')).orders[0].items[0]);
+  const item = await page.evaluate(() => JSON.parse(localStorage.getItem('greencart_store_v1')).orders[0].items[0]);
   expect(item.selectedSize).toBe('US 9');
   expect(item.selectedColor).toBe('#f8fafc');
   await page.locator('#continueShoppingBtn').click();

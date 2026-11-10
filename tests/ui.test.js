@@ -31,13 +31,16 @@ function loadPage() {
     script.textContent = fs.readFileSync(path.join(root, file), 'utf8');
     window.document.body.appendChild(script);
   };
+  inject('js/config.js');
+  inject('js/currency.js');
   inject('js/products.js');
   inject('js/store.js');
+  inject('js/payments.js');
   inject('js/app.js');
   // Top-level `const` bindings are not placed on `window`, so expose the public
   // handles the tests need through a small bridge.
   const bridge = window.document.createElement('script');
-  bridge.textContent = 'window.AppStore = AppStore; window.renderAdminOrders = renderAdminOrders; window.renderCartDrawer = renderCartDrawer; window.renderAdminProducts = renderAdminProducts; window.renderAdminOrders = renderAdminOrders; window.renderAdminInventory = renderAdminInventory; window.adminListState = adminListState; window.renderProductPage = renderProductPage; window.getFilteredProducts = getFilteredProducts; window.renderAdminCustomers = renderAdminCustomers; window.renderAdminDiscounts = renderAdminDiscounts; window.restorePagerFocus = restorePagerFocus; window.announceListChange = announceListChange; window.renderAdminList = renderAdminList;';
+  bridge.textContent = 'window.AppStore = AppStore; window.renderAdminOrders = renderAdminOrders; window.renderCartDrawer = renderCartDrawer; window.renderAdminProducts = renderAdminProducts; window.renderAdminOrders = renderAdminOrders; window.renderAdminInventory = renderAdminInventory; window.adminListState = adminListState; window.renderProductPage = renderProductPage; window.getFilteredProducts = getFilteredProducts; window.renderAdminCustomers = renderAdminCustomers; window.renderAdminDiscounts = renderAdminDiscounts; window.restorePagerFocus = restorePagerFocus; window.announceListChange = announceListChange; window.renderAdminList = renderAdminList; window.renderAdminRecovery = renderAdminRecovery; window.renderAdminPanel = renderAdminPanel;';
   window.document.body.appendChild(bridge);
   return { window, document: window.document, errors, close: () => window.close() };
 }
@@ -53,7 +56,11 @@ test('the storefront renders products, categories and empty account state', () =
     assert.equal(document.querySelectorAll('.cat-pill').length, 6);
     assert.match(document.getElementById('resultsCount').textContent, /Showing 14 objects/);
     assert.equal(document.getElementById('navCartBadge').textContent, '0');
-    assert.match(document.getElementById('featuredPrice').textContent, /\$299/);
+    // The store opens in naira, so the featured $299 converts at the pinned rate.
+    assert.match(document.getElementById('featuredPrice').textContent, /^₦403,058$/);
+    page.window.GreenCartCurrency.set('USD');
+    page.window.renderProductGrid();
+    assert.match(document.getElementById('featuredPrice').textContent, /^\$299\.00$/);
   } finally {
     page.close();
   }
@@ -111,7 +118,10 @@ test('a checkout with a half-cent promotion discount shows the rounded total', (
     // Force a 4.10 subtotal so 15% lands exactly on half a cent (0.615 -> 0.62).
     store.saveProduct({ id: 'aura-14', title: 'Minimalist Matte Thermal Flask', category: 'living', price: 4.10, stock: 5, description: 'Rounding probe' });
     store.addToCart('aura-14');
-    store.applyPromo('AURA15');
+    store.applyPromo('GC15');
+    // Rounding to the cent only exists in USD; the store now opens in naira,
+    // where prices render as whole naira and a half cent is not representable.
+    window.GreenCartCurrency.set('USD');
     window.renderCartDrawer();
     assert.match(document.getElementById('cartDiscount').textContent.trim(), /^−\$0\.62/);
     const totals = store.getCartTotals();
@@ -673,6 +683,42 @@ test('the helper renders the rows belonging to the current page, not always the 
     assert.equal(shown.length, 5);
     assert.equal(shown[0], 'Item 21');
     assert.match(document.getElementById('adminProductPager').textContent, /Showing 21.25 of 25/);
+  } finally {
+    page.close();
+  }
+});
+
+test('the admin says so when saved data could not be read', () => {
+  const page = loadPage();
+  try {
+    const { window, document } = page;
+    document.querySelector('[data-tab="admin"]').click();
+    const banner = document.getElementById('adminRecovery');
+
+    // A healthy store is quiet.
+    assert.equal(window.AppStore.recovery, null);
+    window.renderAdminRecovery();
+    assert.equal(banner.hidden, true, 'no banner when saved data read fine');
+
+    // Simulate what a corrupt saved value produces at boot.
+    window.AppStore.recovery = { reason: 'unreadable', bytes: 20 };
+    window.renderAdminRecovery();
+    assert.equal(banner.hidden, false, 'the banner appears');
+    assert.equal(banner.getAttribute('role'), 'alert', 'it is announced as an alert');
+    const text = banner.textContent;
+    assert.match(text, /could not be read/i);
+    assert.match(text, /built-in defaults, not your saved data/i, 'it says the data below is not theirs');
+    assert.match(text, /20 bytes/, 'it reports how much is stored, so the size is checkable');
+    assert.match(text, /Nothing has been overwritten/i, 'it says the data is still there, which is true');
+
+    // Dismissing hides it for this view without touching the stored value.
+    document.getElementById('adminRecoveryDismiss').click();
+    assert.equal(banner.hidden, true, 'dismiss hides the banner');
+    assert.equal(window.AppStore.recovery.dismissed, true, 'and records the dismissal');
+
+    // Rendering again must not bring it back.
+    window.renderAdminRecovery();
+    assert.equal(banner.hidden, true, 'a re-render does not resurrect a dismissed banner');
   } finally {
     page.close();
   }

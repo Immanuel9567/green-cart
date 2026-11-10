@@ -6,6 +6,12 @@ async function load(page) {
   await page.goto('/');
 }
 
+// The admin is out of the public nav; these checks reach it with ?admin=1.
+async function loadAdmin(page) {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/?admin=1');
+}
+
 test.describe('mobile touch feedback', () => {
   test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
@@ -24,6 +30,8 @@ test.describe('mobile touch feedback', () => {
     await page.locator('[data-tab="cart"]').tap();
     await expect(page.locator('#cartDrawer')).toHaveClass(/open/);
     await page.locator('#cartCloseBtn').tap();
+    await page.locator('[data-tab="shop"]').tap();
+    await page.goto('/?admin=1');
     await page.locator('[data-tab="admin"]').tap();
     await expect(page.locator('#adminModal')).toHaveClass(/open/);
     await page.locator('#adminCloseBtn').tap();

@@ -1,57 +1,65 @@
 # Continuous integration
 
-> **Action needed from a maintainer:** this workflow is ready but switched off. You can enable it in about a minute from the GitHub website — see [Activating it](#activating-it). No local setup, token or command line is required.
+**Status: active.** The workflow lives at [`.github/workflows/tests.yml`](../.github/workflows/tests.yml) and runs automatically.
 
-`tests.yml` in this directory is ready to use, but it is **not active**. GitHub only runs workflows from `.github/workflows/`, and the GitHub App connection used to push this repository is not permitted to create or update workflow files:
+The `ci/tests.yml` reference copy that used to sit here has been deleted. It was kept because the automated connection could not create workflow files; a maintainer has since added the real file through the GitHub website. Keeping two copies risked someone editing the reference by mistake and seeing no effect.
 
-```
-refusing to allow a GitHub App to create or update workflow
-`.github/workflows/tests.yml` without `workflows` permission
-```
+## What runs, and when
 
-Until that permission is granted, checks are run locally before opening a pull request.
+| Trigger | When |
+| --- | --- |
+| `pull_request` | Any pull request, opened or updated |
+| `push` → `main` | Every merge to the production branch |
 
-## Activating it
+Job **Unit, DOM and browser tests** runs on `ubuntu-latest`:
 
-**Easiest, works in the browser with no setup:**
+1. Check out the repository
+2. Set up Node 22 (with npm cache)
+3. `npm ci`
+4. `npm test` — store and jsdom DOM tests (currently 42)
+5. Install Playwright Chromium
+6. `npm run test:e2e` — browser tests against a local static server (currently 43)
+7. On failure only: upload `playwright-report/` and `test-results/` as an artifact
 
-1. Open [`ci/tests.yml`](tests.yml) in this repository on GitHub and press **Copy raw file** (or select all and copy).
-2. In the repository, choose **Add file → Create new file**.
-3. Type `.github/workflows/tests.yml` as the filename (the slashes create the folders).
-4. Paste the contents and commit straight to `main`, or open a pull request with it.
+Typical duration is 1–2 minutes.
 
-Commits made in the browser are not subject to the App restriction that blocked the automated push. The workflow then runs on every pull request and on pushes to `main`.
+## Is it enforced?
 
-**Alternative, from a terminal with your own GitHub account:**
+**Not yet.** A successful run does not by itself block a merge, and `main` deploys to production on every push. To make the check mandatory:
+
+1. Repository **Settings** → **Rules** → **Rulesets** (or **Branches** on older UI)
+2. **New branch ruleset**, target `main`
+3. Enable **Require status checks to pass before merging**
+4. Add **Unit, DOM and browser tests**
+5. Save
+
+Until that is done, CI is advisory: it tells you about breakage, it does not prevent it.
+
+## When it fails
+
+Open the failing run in the **Actions** tab and expand the failed step.
+
+- **`npm ci` fails** — `package-lock.json` is out of sync with `package.json`. Run `npm install` locally and commit the lockfile.
+- **Unit or DOM tests fail** — reproducible locally with `npm test`.
+- **Browser tests fail** — reproduce with `npm run test:e2e`. Download the uploaded artifact for screenshots, traces and the Playwright report.
+- **Server won't start** — the Playwright config runs `python3 -m http.server 8000`, which is preinstalled on `ubuntu-latest`. A failure here usually means the port is already in use or the config changed.
+
+## Action versions
+
+Pinned to the current major tags, verified to exist on 2026-11-06:
+
+| Action | Tag | Latest release |
+| --- | --- | --- |
+| `actions/checkout` | `v7` | 7.0.1 |
+| `actions/setup-node` | `v7` | 7.1.0 |
+| `actions/upload-artifact` | `v7` | 7.0.2 |
+
+## Local checks before pushing
 
 ```sh
-git clone https://github.com/Immanuel9567/e-commerce-proj
-cd e-commerce-proj
-mkdir -p .github/workflows
-git mv ci/tests.yml .github/workflows/tests.yml
-git commit -m "Activate CI workflow"
-git push
+npm test              # unit + DOM, seconds
+npm run test:e2e      # browser tests, needs Playwright's Chromium
+npm run test:mutation # confirms the tests catch deliberate breakage
 ```
 
-A personal token or `gh auth login` session with the `workflow` scope is required.
-
-Once `.github/workflows/tests.yml` exists on `main`, delete this note and `ci/tests.yml` so there is only one copy to maintain.
-
-## What it runs
-
-- `npm ci`
-- `npm test` — business-logic and jsdom tests, no browser needed
-- `npx playwright install --with-deps chromium`
-- `npm run test:e2e` — the config starts its own static server on port 8000
-- Uploads `playwright-report/` and `test-results/` only when a step fails
-
-Runner: GitHub-hosted `ubuntu-latest`, Node 22, npm caching, 15-minute timeout, read-only `contents` permission. Actions are pinned at `v7`.
-
-## Local equivalent
-
-```sh
-npm ci
-npm test
-npx playwright install chromium   # once
-npm run test:e2e
-```
+`npm run test:mutation` refuses to start when `js/store.js` or `js/app.js` has uncommitted changes, because a half-applied mutation looks identical to a dirty tree. Pass `ALLOW_DIRTY=1` for deliberate work in progress.

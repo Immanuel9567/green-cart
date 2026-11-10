@@ -1,4 +1,8 @@
-const STORE_STATE_KEY = 'v8_store_v1';
+const STORE_STATE_KEY = 'greencart_store_v1';
+// Keys written by the previous brand name. Read once on boot and copied to the
+// new key, so renaming the brand does not silently empty a returning visitor's
+// cart, saved items and order history.
+const LEGACY_STORE_STATE_KEYS = ['v8_store_v1'];
 const STORE_CATEGORIES = {
   audio: 'Audio',
   timepieces: 'Timepieces',
@@ -7,7 +11,7 @@ const STORE_CATEGORIES = {
   tech: 'Workspace & Tech'
 };
 const DEFAULT_PROMOTIONS = [
-  { code: 'AURA15', percent: 15, active: true, start: '', end: '' },
+  { code: 'GC15', percent: 15, active: true, start: '', end: '' },
   { code: 'MONO15', percent: 15, active: true, start: '', end: '' },
   { code: 'VIP25', percent: 25, active: true, start: '', end: '' }
 ];
@@ -51,7 +55,30 @@ class Store {
     this.activeCategory = 'all';
     this.searchQuery = '';
     this.sortBy = 'featured';
+    // Adopt a legacy save if the new key has never been written.
+    if (this.readRaw(STORE_STATE_KEY) === null) {
+      const legacyKey = LEGACY_STORE_STATE_KEYS.find(key => this.readRaw(key) !== null);
+      if (legacyKey) {
+        const legacyValue = this.readRaw(legacyKey);
+        try {
+          this.storage.setItem(STORE_STATE_KEY, legacyValue);
+        } catch (_) { /* storage full: the in-memory read below still works */ }
+        this.migratedFrom = legacyKey;
+      }
+    }
     const saved = this.read(STORE_STATE_KEY, null);
+    // A stored value that exists but does not parse, or parses to something that
+    // is not an object, used to be discarded in silence: the shop reverted to
+    // seed data and past orders were gone with no explanation. Record it so the
+    // UI can say so rather than pretend nothing happened.
+    const raw = this.readRaw(STORE_STATE_KEY);
+    this.recovery = null;
+    if (raw !== null) {
+      const unreadable = saved === null || typeof saved !== 'object';
+      if (unreadable) {
+        this.recovery = { reason: saved === null ? 'unreadable' : 'unexpected shape', bytes: raw.length };
+      }
+    }
     const source = saved && typeof saved === 'object' ? saved : {};
     const products = (Array.isArray(source.products) ? source.products : seedProducts).map(product => this.normalizeProduct(product));
     const cart = Array.isArray(source.cart) ? source.cart : this.read('aura_cart', []);
@@ -73,6 +100,16 @@ class Store {
       return value ? JSON.parse(value) : fallback;
     } catch (_) {
       return fallback;
+    }
+  }
+
+  // The raw stored string, or null when nothing is stored. read() cannot tell a
+  // key that was never written from one that failed to parse; this can.
+  readRaw(key) {
+    try {
+      return this.storage.getItem(key);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -359,7 +396,7 @@ class Store {
     const now = this.now();
     let reference;
     do {
-      reference = `AURA-${now.getFullYear()}-${this.uniqueId('order').slice(6).toUpperCase()}`;
+      reference = `GC-${now.getFullYear()}-${this.uniqueId('order').slice(6).toUpperCase()}`;
     } while (this.orders.some(order => order.reference === reference));
     const order = {
       reference,
@@ -372,7 +409,16 @@ class Store {
       shipping: totals.shipping,
       total: totals.total,
       promotionCode: totals.promotion ? totals.promotion.code : '',
-      paymentMethod: String(details.paymentMethod || 'Apple Pay')
+      paymentMethod: String(details.paymentMethod || 'Card'),
+      // Payment state is recorded, never inferred. 'none' means no provider was
+      // involved; 'paid' only ever comes from a server that verified the charge.
+      payment: details.payment && typeof details.payment === 'object'
+        ? {
+            provider: String(details.payment.provider || ''),
+            reference: String(details.payment.reference || ''),
+            status: ['paid', 'unverified', 'none'].includes(details.payment.status) ? details.payment.status : 'unverified'
+          }
+        : { provider: '', reference: '', status: 'none' }
     };
     const products = this.products.map(product => {
       const sold = items.filter(item => item.id === product.id).reduce((sum, item) => sum + item.quantity, 0);

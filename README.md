@@ -1,4 +1,4 @@
-# V8's storefront
+# GreenCart storefront
 
 A static storefront with a locally persisted admin preview. Run it from the project directory:
 
@@ -12,18 +12,27 @@ All product images are served from `assets/images/` in this repository, so the s
 
 Product images and titles open a full details page at a reloadable URL such as `/?product=aura-01`. The built-in products can be opened from those links in another browser, but locally added or edited products do not sync: a link to a locally added product may show “Product not found” elsewhere, and edits to built-in products remain local.
 
-## Hosted demo
+## Hosting
 
-The public demo is at **https://e-commerce-proj-umber.vercel.app/**. The Vercel project is linked to this GitHub repository and lists `main` as its production branch. Changes on a session branch do not appear on the public site until they are merged or explicitly deployed to production. See the [changelog](CHANGELOG.md) for deployment history and status.
+The storefront is deployed on Vercel from `main`. The intended public address is **https://shopgreencart.com** (see [docs/GO-LIVE-HOSTING.md](docs/GO-LIVE-HOSTING.md) for the DNS records and who has to add them).
 
-Hosting does not synchronize browser-local data or process payments. The public URL is an unauthenticated demo; do not enter real customer or payment information.
+**Card payments are off until an owner supplies a Paystack public key.** The checkout checks this before doing anything and says so plainly; it will not create an order while payments are unavailable. Turning payments on is documented step by step in **[docs/PAYMENTS.md](docs/PAYMENTS.md)**, including creating the Paystack account and where the secret key goes.
+
+Three things are true today and are not hidden in the UI:
+
+- **A paid order is recorded only in the buyer's browser.** There is no database, so the seller does not receive it. Until that exists, sales are reconciled from the Paystack dashboard.
+- **The admin is not access-controlled.** It is out of the public nav, but anyone with the URL can open it.
+- **The legal pages are placeholders.** `legal/` ships with delivery windows and return periods marked for replacement, and the business contact details live in **`js/contact.js`** — one file that feeds the legal pages and the footer. The pages show a red banner naming whatever is still missing, and `tests/legal.test.js` fails once those details are filled in, so the site cannot quietly present itself as finished.
+
+Prices are stored in US dollars and displayed in naira by default, converted at a rate pinned in `js/config.js` with the date it was checked. Conversion never changes a stored price or an order total.
 
 Promotions can be percentage or fixed-amount codes, or automatic sales with optional start and end dates. Discounts apply to the subtotal, not shipping; a manually applied code takes precedence over automatic sales, which do not stack.
 
 ## Important limitations
 
 - This is not a production admin system: anyone using the page can open Admin, data is not shared between devices, and clearing browser storage removes it. Do not enter real customer or payment information.
-- Checkout does not collect payment or submit a real order. Refunds only record a local status; no money is returned. Stock is reduced when a local order is placed; cancellations restock items, refunds do not.
+- **Checkout now takes real card payments** when configured, but the resulting order is stored only in the buyer's browser. The payment gateway (`api/`) is real and server-verified; the order system behind it is not built. Refunds recorded in the admin only change a local status; a real refund must be issued from the Paystack dashboard.
+- The price a customer is charged is computed by the server from `js/products.js`, never sent by the browser. See `api/_lib/pricing.js`.
 - Every admin table — Products, Inventory, Orders, Customers and Promotions — **searches, filters and pages** 10 rows at a time, paging is keyboard-usable (focus stays on the pager instead of jumping to the top of the page), and each page change is announced to screen readers; the pager shows the visible range and total. Paging is client-side but returns a server-shaped result (`page`, `pageCount`, `total`), so a real API can replace it without rewriting the tables.
 - Products are retired by **archiving**, not deleting. Archiving removes a product from the storefront, search, inventory and low-stock counts, and from bags and saved items, but keeps it in Admin under the **Archived** filter with every past order intact, and it can be restored. Permanent deletion is a two-step action available only on archived products, and it is refused outright for any product that appears in a past order.
 - The earlier checkout generated reference codes without saving orders. Those past codes cannot be recovered from the old application; new orders retain the same reference in Account and Admin.

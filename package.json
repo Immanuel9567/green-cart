@@ -1,9 +1,9 @@
 {
-  "name": "v8-storefront",
+  "name": "greencart-storefront",
   "private": true,
   "scripts": {
     "start": "python3 -m http.server 8000 --bind 0.0.0.0",
-    "test": "node --test tests/store.test.js tests/ui.test.js",
+    "test": "node --test tests/store.test.js tests/ui.test.js tests/payments.test.js tests/gateway.test.js tests/legal.test.js",
     "test:e2e": "playwright test",
     "test:mutation": "node tests/mutation-check.js"
   },

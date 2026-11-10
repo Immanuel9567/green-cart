@@ -1,0 +1,7 @@
+# GreenCart
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin
+
+Sitemap: https://shopgreencart.com/sitemap.xml

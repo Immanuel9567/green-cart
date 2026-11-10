@@ -112,6 +112,13 @@ img { display: block; max-width: 100%; }
 .search-input::-webkit-search-cancel-button { display: none; }
 .search-clear-btn { display: none; padding: 5px 0 5px 5px; color: var(--gray-muted); font-size: .72rem; font-weight: 700; }
 .search-clear-btn.visible { display: block; }
+/* Header actions: the currency switch sits beside the theme switch so the
+   mobile header keeps its two-column layout (see the 720px breakpoint). */
+.header-actions { display: flex; align-items: center; gap: 8px; }
+.currency-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 43px; padding: 0 15px; border-radius: 999px; background: var(--bg-card); box-shadow: var(--shadow-subtle); font-size: .76rem; font-weight: 800; letter-spacing: .02em; white-space: nowrap; transition: box-shadow .2s ease; }
+.currency-button:hover { box-shadow: var(--shadow-subtle), var(--hover-glow); }
+.currency-symbol { font-size: .95rem; line-height: 1; }
+.checkout-disclosure-blocked { padding: 12px 14px; border-radius: 12px; background: rgba(180, 59, 69, .09); color: var(--danger); font-weight: 700; }
 .theme-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 43px; padding: 0 16px; border-radius: 999px; background: var(--bg-card); box-shadow: var(--shadow-subtle); font-size: .76rem; font-weight: 700; white-space: nowrap; transition: box-shadow .2s ease; }
 .theme-button:hover { box-shadow: var(--shadow-subtle), var(--hover-glow); }
 .theme-symbol { font-size: 1rem; line-height: 1; }
@@ -418,6 +425,15 @@ body.dark-mode .theme-notice { background: linear-gradient(90deg, rgba(16, 18, 2
 .footer-content { display: flex; align-items: center; justify-content: space-between; gap: 20px; color: var(--gray-muted); font-size: .72rem; }
 .footer-content > div { display: flex; align-items: center; gap: 14px; }
 .footer-content strong { color: var(--black-primary); font-family: var(--font-display); font-size: 1.1rem; letter-spacing: -.05em; }
+/* Required for card payments: a reachable returns policy, privacy notice and
+   contact route. Kept quiet so it informs without competing with the shop. */
+.footer-links { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; font-size: .72rem; }
+.footer-links a { color: var(--gray-muted); font-weight: 600; transition: color .2s ease; }
+.footer-links a:hover, .footer-links a:focus-visible { color: var(--black-primary); }
+@media (max-width: 680px) {
+  .footer-content { flex-direction: column; align-items: flex-start; gap: 14px; }
+  .footer-content > div { flex-wrap: wrap; }
+}
 
 @media (max-width: 1100px) {
   .product-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -435,8 +451,9 @@ body.dark-mode .theme-notice { background: linear-gradient(90deg, rgba(16, 18, 2
   .header-search { grid-column: 1 / -1; grid-row: 2; }
   .brand-badge { width: 35px; height: 35px; }
   .brand-logo { font-size: 1.3rem; }
-  .theme-button { min-height: 38px; }
-  .site-nav.container { position: fixed; z-index: 100; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: max(12px, env(safe-area-inset-left, 0px)); display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; width: auto; max-width: 520px; overflow: visible; padding: 6px 4px; border-radius: 999px; background: var(--bg-card); box-shadow: 0 10px 24px rgba(17, 25, 38, .16), var(--shadow-subtle); }
+  .theme-button, .currency-button { min-height: 38px; padding: 0 12px; }
+  .header-actions { gap: 6px; }
+  .site-nav.container { position: fixed; z-index: 100; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: max(12px, env(safe-area-inset-left, 0px)); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; width: auto; max-width: 520px; overflow: visible; padding: 6px 4px; border-radius: 999px; background: var(--bg-card); box-shadow: 0 10px 24px rgba(17, 25, 38, .16), var(--shadow-subtle); }
   .site-nav-link { display: flex; align-items: center; justify-content: center; gap: 2px; min-width: 0; min-height: 50px; padding: 8px 2px; border-radius: 999px; font-size: clamp(.69rem, 3vw, .75rem); }
   .site-nav-link:first-child { padding-left: 2px; }
   .site-nav-link.active { background: var(--bg-primary); box-shadow: var(--shadow-inset); }
@@ -481,6 +498,13 @@ body.dark-mode .theme-notice { background: linear-gradient(90deg, rgba(16, 18, 2
   .admin-table td:not([data-label]) { display: block; text-align: center; }
 }
 @media (max-width: 480px) {
+  /* Two header controls plus the brand no longer fit beside each other at this
+     width, and the header was overflowing the viewport. The theme switch keeps
+     its symbol and its accessible name; the words move to a visually-hidden
+     span rather than being removed, so screen readers still announce it. */
+  .header-actions { gap: 5px; }
+  .theme-button, .currency-button { min-height: 38px; padding: 0 10px; gap: 5px; }
+  #themeToggleLabel { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   .card-bottom { align-items: stretch; flex-direction: column; gap: 9px; padding-top: 10px; }
   .product-price { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 0 6px; }
   .add-cart-btn { width: 100%; min-height: 38px; padding: 9px 8px; }
@@ -552,3 +576,17 @@ body.dark-mode .theme-notice { background: linear-gradient(90deg, rgba(16, 18, 2
 .admin-page-btn { padding: 7px 14px; border-radius: 999px; background: var(--bg-card); box-shadow: var(--shadow-subtle); color: var(--black-primary); font-size: .72rem; font-weight: 700; transition: box-shadow .2s ease, opacity .2s ease; }
 .admin-page-btn:hover:not(:disabled) { box-shadow: var(--shadow-subtle), var(--hover-glow); }
 .admin-page-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Shown only when saved data existed but could not be read. Deliberately loud:
+   the shop beneath it is showing defaults, not the customer's data. */
+.admin-recovery {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  margin-bottom: 18px; padding: 14px 16px; border-radius: 14px;
+  border: 1px solid rgba(190, 60, 40, 0.35);
+  background: rgba(190, 60, 40, 0.07);
+  color: var(--black-primary);
+}
+.admin-recovery[hidden] { display: none; }
+.admin-recovery strong { display: block; font-size: .82rem; margin-bottom: 3px; }
+.admin-recovery span { display: block; font-size: .74rem; line-height: 1.5; color: var(--black-secondary); max-width: 62ch; }
+.admin-recovery .admin-action-btn { flex-shrink: 0; }

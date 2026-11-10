@@ -1,9 +1,70 @@
 const { test, expect } = require('@playwright/test');
 
-async function load(page) {
+async function load(page, path = '/', { currency = 'USD' } = {}) {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.route('https://images.unsplash.com/**', route => route.abort());
-  await page.goto('/');
+  // These tests assert dollar arithmetic (a cent-scale rounding bug, a $17
+  // discount). Pinning USD keeps that readable; the shipped naira default and
+  // the currency switch are covered in currency.spec.js.
+  await page.addInitScript(code => {
+    try { window.localStorage.setItem('greencart_currency_v1', code); } catch (_) { }
+  }, currency);
+  await page.goto(path);
+}
+
+// Admin is deliberately absent from the public nav, so only the tests that
+// drive the admin ask for it.
+// Stand in for a real payment provider so the purchase journey can be tested
+// end to end without taking a payment. This injects the public key and verify
+// URL that js/config.js deliberately ships empty, then answers the browser the
+// way a real verification server would.
+async function stubPayments(page, { confirmed = true } = {}) {
+  await page.addInitScript(({ confirmed }) => {
+    window.GREENCART_CONFIG = {
+      payments: { publicKey: 'pk_test_e2e' }
+    };
+    window.__charges = [];
+    window.PaystackPop = {
+      setup(options) {
+        return {
+          openIframe() {
+            window.__charges.push({ amount: options.amount, currency: options.currency, email: options.email });
+            Promise.resolve().then(() => options.callback({ reference: 'PSK-E2E' }));
+          }
+        };
+      }
+    };
+  }, { confirmed });
+  // The server prices the order before anything is charged.
+  await page.route('**/api/initialize-payment', async route => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        success: true,
+        reference: 'PSK-E2E',
+        amount: 40305798,
+        currency: 'NGN',
+        usdTotal: 299,
+        items: body.lines || []
+      })
+    });
+  });
+  await page.route('**/api/verify-payment', async route => {
+    const body = JSON.parse(route.request().postData() || '{}');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(confirmed
+        ? { success: true, reference: body.reference || 'PSK-E2E', amountKobo: 40305798 }
+        : { success: false, message: 'Not confirmed by the provider.' })
+    });
+  });
+}
+
+async function loadAdmin(page) {
+  await load(page, '/?admin=1');
 }
 
 async function addFirstProduct(page) {
@@ -65,7 +126,9 @@ test('only the bag scrolls while open and the page position is restored', async 
 });
 
 test('checkout saves reference and status to account, inventory, analytics and customers', async ({ page }) => {
-  await load(page);
+  await load(page, '/?admin=1');
+  await stubPayments(page);
+  await page.reload();
   await addFirstProduct(page);
   await openBag(page);
   await page.locator('#checkoutTriggerBtn').click();
@@ -73,11 +136,11 @@ test('checkout saves reference and status to account, inventory, analytics and c
     await expect(page.locator(`#${id}`)).toHaveValue('');
     await expect(page.locator(`#${id}`)).not.toHaveAttribute('placeholder');
   }
-  const apple = page.getByRole('radio', { name: 'Apple Pay' });
-  await expect(apple).toHaveCSS('background-color', 'rgb(0, 0, 0)');
-  await expect(apple).toHaveCSS('color', 'rgb(255, 255, 255)');
-  await page.getByRole('radio', { name: 'Credit card' }).click();
-  await expect(page.getByRole('radio', { name: 'Credit card' })).toHaveAttribute('aria-checked', 'true');
+  const card = page.getByRole('radio', { name: 'Card' });
+  await expect(card).toHaveAttribute('aria-checked', 'true');
+  // The fake Apple Pay / Credit card / Crypto buttons are gone; there is one
+  // real payment path and nothing that pretends to be another one.
+  await expect(page.getByRole('radio')).toHaveCount(1);
   await page.locator('#checkoutName').fill('Ada Customer');
   await page.locator('#checkoutAddress').fill('1 Main Street');
   await page.locator('#checkoutCity').fill('Ibadan');
@@ -85,7 +148,7 @@ test('checkout saves reference and status to account, inventory, analytics and c
   await page.locator('#confirmPayBtn').click();
   await expect(page.locator('#orderSuccessScreen')).toBeVisible();
   const reference = (await page.locator('#orderTrackingNum').textContent()).trim();
-  expect(reference).toMatch(/^AURA-\d{4}-/);
+  expect(reference).toMatch(/^GC-\d{4}-/);
   await expect(page.locator('#continueShoppingBtn')).toHaveText('Return to Home');
   await page.locator('#continueShoppingBtn').click();
   await page.locator('[data-tab="profile"]').click();
@@ -106,7 +169,7 @@ test('checkout saves reference and status to account, inventory, analytics and c
   await expect(page.locator('#adminOrderBody')).toContainText(reference);
   await page.getByRole('button', { name: 'View details' }).click();
   await expect(page.locator('#orderDetails')).toContainText('1 Main Street');
-  await expect(page.locator('#orderDetails')).toContainText('Credit Card');
+  await expect(page.locator('#orderDetails')).toContainText('Card');
   // Fulfilment is a one-way path: pending -> processing -> shipped.
   await page.locator('[data-admin-action="order-status"]').selectOption('processing');
   await expect(page.locator('#orderDetails')).toContainText('Processing');
@@ -137,16 +200,18 @@ test('dark checkout selection is white with black text', async ({ page }) => {
   await addFirstProduct(page);
   await openBag(page);
   await page.locator('#checkoutTriggerBtn').click();
-  const selected = page.getByRole('radio', { name: 'Apple Pay' });
+  const selected = page.getByRole('radio', { name: 'Card' });
   await expect(selected).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect(selected).toHaveCSS('color', 'rgb(0, 0, 0)');
+  // Arrow keys used to move between the three fake methods. One real method
+  // remains, so arrow keys must simply leave it selected rather than error.
   await selected.focus();
   await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('radio', { name: 'Credit card' })).toHaveAttribute('aria-checked', 'true');
+  await expect(selected).toHaveAttribute('aria-checked', 'true');
 });
 
 test('admin products, low stock and scheduled promotions work in the storefront', async ({ page }) => {
-  await load(page);
+  await load(page, '/?admin=1');
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="products"]').click();
   await page.locator('#addProductBtn').click();
@@ -217,7 +282,9 @@ test('admin products, low stock and scheduled promotions work in the storefront'
 
 test('mobile navigation, admin and checkout remain usable without page overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await load(page);
+  await load(page, '/?admin=1');
+  await stubPayments(page);
+  await page.reload();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   await page.locator('[data-tab="admin"]').click();
   await expect(page.locator('#adminModal')).toBeVisible();
@@ -271,7 +338,9 @@ for (const width of [320, 390, 420, 421, 480, 680]) {
     expect(844 - navBox.y - navBox.height).toBeLessThanOrEqual(32);
     const radius = await nav.evaluate(element => parseFloat(getComputedStyle(element).borderTopLeftRadius));
     expect(radius).toBeGreaterThanOrEqual(navBox.height / 2);
-    for (const name of ['Home', 'Shop', 'Saved', 'Bag', 'Account', 'Admin']) {
+    // Admin is deliberately absent from the public nav, so the bottom bar has five
+    // items. Every one of them still has to meet the 44px touch target.
+    for (const name of ['Home', 'Shop', 'Saved', 'Bag', 'Account']) {
       const button = nav.getByRole('button', { name: new RegExp(`^${name}\\b`) });
       await expect(button).toBeVisible();
       const box = await button.boundingBox();
@@ -326,7 +395,7 @@ test('mobile navigation pill follows both themes and supports keyboard navigatio
 
 test('mobile bottom navigation opens all storefront panels', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await load(page);
+  await load(page, '/?admin=1');
   const nav = page.locator('.site-nav');
   await nav.getByRole('button', { name: 'Shop' }).click();
   await expect(nav.getByRole('button', { name: 'Shop' })).toHaveAttribute('aria-current', 'page');
@@ -374,7 +443,7 @@ for (const [layout, width, height] of [['desktop', 1280, 800], ['mobile', 390, 8
 
 test('admin search, status filters and paging work in a real browser', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/');
+  await loadAdmin(page);
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="products"]').click();
 
@@ -428,7 +497,7 @@ test('admin search, status filters and paging work in a real browser', async ({ 
 
 test('admin customer and promotion lists search, filter and page', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/');
+  await loadAdmin(page);
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="customers"]').click();
 
@@ -467,7 +536,7 @@ test('admin customer and promotion lists search, filter and page', async ({ page
 
 test('keyboard users can page the admin lists without losing focus', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/');
+  await loadAdmin(page);
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="products"]').click();
   // Active, not All: archiving below has to actually shrink the visible list,
@@ -533,7 +602,7 @@ test('keyboard users can page the admin lists without losing focus', async ({ pa
 
 test('paging announces the new range through a live region that survives re-renders', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/');
+  await loadAdmin(page);
   await page.locator('[data-tab="admin"]').click();
   await page.locator('[data-admin="products"]').click();
   await page.locator('[data-product-filter="all"]').click();
@@ -563,4 +632,43 @@ test('paging announces the new range through a live region that survives re-rend
   await expect(page.locator('#adminOrderPager')).toBeHidden();
   const text = await announcer.textContent();
   expect(text.trim()).toBe('');
+});
+
+test('corrupt saved data is reported in the admin instead of vanishing silently', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await loadAdmin(page);
+
+  // Save something real, so the loss below is observed rather than assumed.
+  const before = await page.evaluate(() => {
+    AppStore.updateStock('aura-01', 30);
+    AppStore.addToCart('aura-01');
+    AppStore.placeOrder({ name: 'Real Buyer', address: '1 St', city: 'Lagos', email: 'real@example.com', paymentMethod: 'Card' });
+    return AppStore.orders.length;
+  });
+  expect(before).toBeGreaterThan(0);
+
+  // Corrupt the real key and reload, as a half-written value would.
+  await page.evaluate(() => localStorage.setItem('greencart_store_v1', '{"products": [broken json'));
+  await page.reload();
+
+  // The order is genuinely gone: this is data loss, not a display quirk.
+  expect(await page.evaluate(() => AppStore.orders.length)).toBe(0);
+
+  await page.locator('[data-tab="admin"]').click();
+  const banner = page.locator('#adminRecovery');
+  await expect(banner).toBeVisible();
+  await expect(banner).toHaveAttribute('role', 'alert');
+  await expect(banner).toContainText('could not be read');
+  await expect(banner).toContainText('built-in defaults, not your saved data');
+  // The stored bytes are still there; the banner must not claim they were deleted.
+  expect(await page.evaluate(() => localStorage.getItem('greencart_store_v1'))).toBe('{"products": [broken json');
+
+  await page.locator('#adminRecoveryDismiss').click();
+  await expect(banner).toBeHidden();
+
+  // A clean profile shows no banner at all.
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await page.locator('[data-tab="admin"]').click();
+  await expect(page.locator('#adminRecovery')).toBeHidden();
 });

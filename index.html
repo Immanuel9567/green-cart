@@ -3,19 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>V8's | Objects for everyday living</title>
+  <title>GreenCart | Everyday essentials, considered</title>
   <meta name="description" content="Thoughtfully designed objects for everyday living.">
   <meta name="theme-color" content="#e6ecf4">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%23111215%22/><text y=%22.72em%22 x=%2250%%22 font-size=%2260%22 font-weight=%22900%22 text-anchor=%22middle%22 fill=%22%23ffffff%22 font-family=%22sans-serif%22>V</text></svg>">
+  <link rel="canonical" href="https://shopgreencart.com/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="GreenCart | Everyday essentials, considered">
+  <meta property="og:description" content="Thoughtfully designed objects for everyday living. Delivered across Nigeria.">
+  <meta property="og:url" content="https://shopgreencart.com/">
+  <meta property="og:image" content="https://shopgreencart.com/assets/images/hero_headphones.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2228%22 fill=%22%23111215%22/><text y=%22.72em%22 x=%2250%%22 font-size=%2260%22 font-weight=%22900%22 text-anchor=%22middle%22 fill=%22%23ffffff%22 font-family=%22sans-serif%22>G</text></svg>">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2228%22 fill=%22%23111215%22/><text y=%22.72em%22 x=%2250%%22 font-size=%2260%22 font-weight=%22900%22 text-anchor=%22middle%22 fill=%22%23ffffff%22 font-family=%22sans-serif%22>G</text></svg>">
   <link rel="preload" href="assets/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <header class="site-header">
     <div class="container header-wrapper">
-      <a href="#home" class="brand-logo" id="brandLogo" aria-label="V8's home">
-        <span class="brand-badge" aria-hidden="true">V</span>
-        <span>V8's<span class="brand-dot">.</span></span>
+      <a href="#home" class="brand-logo" id="brandLogo" aria-label="GreenCart home">
+        <span class="brand-badge" aria-hidden="true">G</span>
+        <span>GreenCart<span class="brand-dot">.</span></span>
       </a>
       <div class="header-search">
         <div class="search-input-wrapper">
@@ -24,10 +33,16 @@
           <button type="button" class="search-clear-btn" id="searchClearBtn">Clear</button>
         </div>
       </div>
-      <button type="button" class="theme-button" id="themeToggleBtn" aria-pressed="false">
-        <span class="theme-symbol" aria-hidden="true">◐</span>
-        <span id="themeToggleLabel">Dark mode</span>
-      </button>
+      <div class="header-actions">
+        <button type="button" class="currency-button" id="currencyToggleBtn" aria-label="Switch currency. Prices currently shown in Nigerian naira.">
+          <span class="currency-symbol" aria-hidden="true" id="currencyToggleSymbol">₦</span>
+          <span id="currencyToggleLabel">NGN</span>
+        </button>
+        <button type="button" class="theme-button" id="themeToggleBtn" aria-pressed="false">
+          <span class="theme-symbol" aria-hidden="true">◐</span>
+          <span id="themeToggleLabel">Dark mode</span>
+        </button>
+      </div>
     </div>
     <nav class="container site-nav" aria-label="Main navigation">
       <button type="button" class="site-nav-link active" data-tab="home" aria-current="page">Home</button>
@@ -35,7 +50,10 @@
       <button type="button" class="site-nav-link" data-tab="wishlist">Saved</button>
       <button type="button" class="site-nav-link" data-tab="cart">Bag <span class="nav-count" id="navCartBadge">0</span></button>
       <button type="button" class="site-nav-link" data-tab="profile">Account</button>
-      <button type="button" class="site-nav-link nav-admin" data-tab="admin">Admin</button>
+      <!-- Admin is deliberately not in the public nav. It is reachable for the
+           owner via ?admin=1 until real authentication lands (docs/PAYMENTS.md).
+           Hiding it is not security; it stops advertising it to shoppers. -->
+      <button type="button" class="site-nav-link nav-admin" data-tab="admin" hidden>Admin</button>
     </nav>
   </header>
 
@@ -51,7 +69,7 @@
                   <img src="assets/images/hero_headphones.jpg" alt="AURA wireless over-ear headphones" class="hero-product-img" id="featuredProductImage" data-fallback-category="audio">
                   <span class="hero-price-chip" id="featuredPriceChip">
                     <span class="hero-price-label">Featured audio</span>
-                    <span class="hero-price-value"><span id="featuredPrice">$299</span> <small>USD</small></span>
+                    <span class="hero-price-value"><span id="featuredPrice"></span> <small id="featuredCurrency">NGN</small></span>
                   </span>
                   <span class="hero-spec-pill"><span class="spec-dot" aria-hidden="true"></span> 40mm drivers</span>
                 </a>
@@ -146,21 +164,19 @@
         <div class="input-groove"><label for="checkoutEmail">Contact email</label><input type="email" id="checkoutEmail" name="email" required maxlength="160"></div>
       </div>
       <fieldset class="payment-fieldset">
-        <legend>Payment method</legend>
+        <legend>Payment</legend>
         <div class="payment-options" role="radiogroup" aria-label="Payment method">
-          <button type="button" class="pay-card-pill active" role="radio" aria-checked="true" tabindex="0" data-payment="Apple Pay"><span class="payment-mark" aria-hidden="true">◉</span><span>Apple Pay</span></button>
-          <button type="button" class="pay-card-pill" role="radio" aria-checked="false" tabindex="-1" data-payment="Credit Card"><span class="payment-mark" aria-hidden="true">▭</span><span>Credit card</span></button>
-          <button type="button" class="pay-card-pill" role="radio" aria-checked="false" tabindex="-1" data-payment="Crypto / BTC"><span class="payment-mark" aria-hidden="true">B</span><span>Crypto / BTC</span></button>
+          <button type="button" class="pay-card-pill active" role="radio" aria-checked="true" tabindex="0" data-payment="Card"><span class="payment-mark" aria-hidden="true">▭</span><span>Card</span></button>
         </div>
       </fieldset>
-      <p class="checkout-disclosure">Local preview only. No payment will be collected.</p>
+      <p class="checkout-disclosure" id="checkoutDisclosure">Card payments are not switched on yet, so orders cannot be placed right now.</p>
       <button type="submit" class="checkout-btn" id="confirmPayBtn">Place order <span aria-hidden="true">→</span></button>
     </form>
     <div id="orderSuccessScreen" class="order-success-screen" hidden>
       <div class="success-check-badge" aria-hidden="true">✓</div>
       <div class="section-kicker">THANK YOU</div>
-      <h2 class="modal-heading" id="orderSuccessTitle">Order saved<span class="brand-dot">.</span></h2>
-      <p>Your order is saved on this device. No payment was collected.</p>
+      <h2 class="modal-heading" id="orderSuccessTitle">Order placed<span class="brand-dot">.</span></h2>
+      <p id="orderSuccessSummary">Your payment was confirmed and your order has been received.</p>
       <div class="order-reference"><span>Order reference</span><strong id="orderTrackingNum"></strong></div>
       <button type="button" class="checkout-btn" id="continueShoppingBtn">Return to Home</button>
     </div>
@@ -178,7 +194,7 @@
     <button type="button" class="text-close modal-close-btn admin-close" id="adminCloseBtn"><span aria-hidden="true">×</span> Close</button>
     <div class="admin-layout">
       <aside class="admin-sidebar">
-        <div class="section-kicker">V8'S / STORE</div>
+        <div class="section-kicker">GREENCART / STORE</div>
         <h2 id="adminTitle">Admin<span class="brand-dot">.</span></h2>
         <nav class="admin-navigation" aria-label="Admin sections">
           <button type="button" class="admin-tab active" data-admin="analytics" aria-current="page">Overview</button>
@@ -191,6 +207,15 @@
         <div class="admin-local-note"><span aria-hidden="true"></span> Local preview</div>
       </aside>
       <div class="admin-content">
+        <!-- Shown only when saved data existed but could not be read. Without it
+             the shop silently reverts to seed data and past orders vanish. -->
+        <div class="admin-recovery" id="adminRecovery" role="alert" hidden>
+          <div>
+            <strong>Saved data could not be read.</strong>
+            <span id="adminRecoveryDetail">The catalogue and orders below are the built-in defaults, not your saved data. Nothing has been overwritten yet.</span>
+          </div>
+          <button type="button" class="admin-action-btn" id="adminRecoveryDismiss">Dismiss</button>
+        </div>
         <section class="admin-panel active" id="admin-analytics">
           <div class="admin-panel-header"><div><div class="section-kicker">STORE PERFORMANCE</div><h3>Overview</h3><p>Your store, at a glance.</p></div></div>
           <div class="analytics-grid">
@@ -326,12 +351,24 @@
 
   <footer class="site-footer">
     <div class="container footer-content">
-      <div><strong>V8's<span class="brand-dot">.</span></strong><span>Thoughtful objects for everyday living.</span></div>
-      <span>© 2026 V8's. All rights reserved.</span>
+      <div><strong>GreenCart<span class="brand-dot">.</span></strong><span>Everyday essentials, considered.</span></div>
+      <nav class="footer-links" aria-label="Store information">
+        <a href="/legal/shipping.html">Delivery &amp; returns</a>
+        <a href="/legal/privacy.html">Privacy</a>
+        <a href="/legal/terms.html">Terms</a>
+        <a href="/legal/contact.html">Contact</a>
+        <span data-contact-footer hidden></span>
+      </nav>
+      <span>© 2026 GreenCart. All rights reserved.</span>
     </div>
   </footer>
+  <script src="js/contact.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/currency.js"></script>
   <script src="js/products.js"></script>
   <script src="js/store.js"></script>
+  <script src="js/payments.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/legal.js"></script>
 </body>
 </html>

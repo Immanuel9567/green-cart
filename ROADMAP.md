@@ -4,7 +4,19 @@
 
 ## Where we are
 
-The current site is a static HTML/CSS/JavaScript storefront with a browser-local admin demo. Catalog edits, cart and saved items, promotions, customers, stock, orders and order references live in the current browser's storage. The admin is not access-controlled; data does not sync across browsers or devices. Checkout, payment and refunds are simulations. Supabase is proposed in the source plan but is **not configured or integrated** here. A Vercel deployment makes the demo available online; it does not make its data shared or secure.
+The current site is a static HTML/CSS/JavaScript storefront with **a real, server-side card payment gateway** and a browser-local admin. Catalogue edits, cart and saved items, promotions, customers, stock and order references live in the current browser's storage. The admin is not access-controlled; data does not sync across browsers or devices.
+
+What is real as of 2026-11-06:
+
+- **Payments.** `api/initialize-payment.js` prices the order server-side and `api/verify-payment.js` confirms the charge with Paystack. A signed webhook covers the case where the browser disappears. The browser cannot set a price or declare a payment successful.
+- **Money is in naira by default** with a USD switch; catalogue prices are stored in USD and converted for display only, at a pinned and dated rate.
+
+What is **not** real, and must not be described as if it were:
+
+- **A paid order is stored only in the buyer's browser.** There is no database, so the seller does not receive the order. The webhook logs the confirmed payment and reports `persisted: false`. Sales are recoverable from the Paystack dashboard and nowhere else.
+- **Payments are off in the committed config.** `payments.publicKey` is empty, so the checkout refuses rather than pretending. Switching it on needs the owner's Paystack account (see [docs/PAYMENTS.md](docs/PAYMENTS.md)).
+- **The admin is public** to anyone who knows the URL. It is out of the public nav for tidiness, not by way of security.
+- Supabase is proposed in the source plan but is **not configured or integrated**. The missing database is the single biggest gap between this and a store that can be left unattended.
 
 The source plan's schema → security → APIs → admin lists → forms → analytics sequence is retained below. The current local UI is a prototype to preserve and adapt, not proof that the future backend phases are complete.
 
@@ -22,6 +34,10 @@ Completed work that is **not** a roadmap phase, recorded so the current state is
 | 2026-11-05 | All 14 built-in product images are now local generated assets; the 8 Unsplash hotlinks are gone and a test enforces local files | `js/products.js`, `assets/images/`, `tests/store.test.js` | Done — not deployed |
 | 2026-11-05 | Playwright suite made runnable in the sandbox via an npm-shipped Chromium 153 and its libraries; fallback tests rewritten to force a real load failure | `README.md`, `tests/e2e/product-page.spec.js` | Done — full suite green, **38/38** |
 | 2026-11-05 | PR #5 merged to `main` (`8ae06a5`); production deploy verified to serve local images and both fixes | — | Done — live at e-commerce-proj-umber.vercel.app |
+| 2026-11-06 | Card payment gateway (`api/`), server-side pricing, signed webhook, naira/USD display currency, honest checkout, legal pages, SEO assets, `docs/PAYMENTS.md` | `api/`, `js/currency.js`, `js/payments.js`, `js/config.js`, `legal/`, `docs/PAYMENTS.md` | Done — **payments off until an owner public key is added** |
+| 2026-11-06 | Buyer-facing order records still browser-only; webhook confirms payments but persists nothing | `api/paystack-webhook.js` | **Open** — needs the Phase 1 database |
+| 2026-11-06 | Product images cut from 3.79 MB to 980 KB (−74%); gateway moved to plain Node HTTP so the webhook can verify signatures; dead currency conversion removed; contact details centralised with a placeholder guard | `assets/images/`, `api/_lib/http.js`, `js/contact.js`, `js/legal.js` | Done — 82 unit/DOM tests, 49 browser tests, 37/37 mutations |
+| 2026-11-06 | Business contact details (email, WhatsApp, street address) still placeholders | `js/contact.js` | **Open** — owner must supply; legal pages show a red warning until then |
 | 2026-11-05 | CI workflow prepared to run `npm test` and `npm run test:e2e` on PRs and pushes to `main` | `ci/tests.yml`, `ci/README.md` | **Blocked** — repo connection cannot write `.github/workflows/`; needs owner to move the file into place |
 | 2026-11-05 | Products can be archived and restored instead of deleted; permanent deletion is archived-only and refused for products with past orders; admin status filter and a retired-product page added | `js/store.js`, `js/app.js`, `index.html`, `css/style.css`, `tests/` | Done — merged in PR #6 (`b01ac14`), verified live |
 | 2026-11-05 | Production deploy verified for PR #6: archiving, discount, status/refund rules and local images all live | — | Done — Admin archive UI could not be clicked from here |
@@ -32,6 +48,12 @@ Completed work that is **not** a roadmap phase, recorded so the current state is
 | 2026-11-05 | Pager no longer drops keyboard focus to `<body>`: focus returns to the arrow used, else the other arrow, else the live status line, and now survives re-renders from archiving as well as paging | `js/app.js`, `tests/` | Done — 35 unit/DOM tests, 42 browser tests, 18/18 mutations caught |
 | 2026-11-05 | Paging now announces the visible range through one persistent live region; the old `aria-live` sat inside the rebuilt pager and was verifiably destroyed on every page change. Mutation checks refuse to start from a dirty tree | `js/app.js`, `index.html`, `tests/` | Done — 37 unit/DOM tests, 43 browser tests, 20/20 mutations caught |
 | 2026-11-05 | The five admin lists now share one renderer; the empty row's column count comes from the table itself and empty messages are escaped once | `js/app.js`, `tests/` | Done — 41 unit/DOM tests, 43 browser tests, 22/22 mutations caught |
+
+| 2026-11-06 | Rebranded from V8's to GreenCart across the UI, page titles, package name and docs; storage key renamed with a one-way migration so carts and orders survive | `index.html`, `js/app.js`, `js/store.js`, `package.json`, `tests/` | Done — 42 unit/DOM tests, 43 browser tests, 24/24 mutations caught |
+| 2026-11-06 | CI activated at `.github/workflows/tests.yml` and its first run passed; duplicate `ci/tests.yml` removed and `ci/README.md` rewritten; hosting/domain runbook added | `.github/workflows/tests.yml`, `ci/README.md`, `docs/GO-LIVE-HOSTING.md` | Done — **not enforced**: needs a branch ruleset requiring the check |
+
+| 2026-11-06 | Unreadable saved data is reported in the admin instead of silently reverting to seed data; loading states deliberately not added because local reads are synchronous | `js/store.js`, `js/app.js`, `index.html`, `css/style.css`, `tests/` | Done — 44 unit/DOM tests, 44 browser tests, 27/27 mutations caught |
+| 2026-11-06 | Contributor permissions documented: what a non-owner cannot do on GitHub and Vercel, and the workarounds that keep the work moving | `docs/CONTRIBUTOR-PERMISSIONS.md` | Done — docs only |
 
 Deliberately **not** done yet, and still needing owner approval: the Supabase backend, authentication and roles, shared data, real payments and refunds, and server-side enforcement of the status and refund rules now modelled locally. The rules added on 2026-11-05 exist only in browser code; a real backend must re-implement and test them server-side in Phases 1–2.
 

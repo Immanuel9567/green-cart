@@ -4,7 +4,7 @@ The current storefront is a browser-local demo. Every future phase below is **no
 
 ```mermaid
 mindmap
-  root((V8 storefront))
+  root((GreenCart storefront))
     Current local demo
       Static storefront
       Browser-local admin and orders

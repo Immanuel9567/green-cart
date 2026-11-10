@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contact us | GreenCart</title>
+  <meta name="description" content="How to reach GreenCart about an order, a delivery or a return.">
+  <meta name="robots" content="index, follow">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .legal-page { max-width: 780px; margin: 0 auto; padding: 40px 24px 80px; }
+    .legal-page h1 { font-family: var(--font-display); font-size: clamp(1.9rem, 5vw, 2.6rem); font-weight: 800; letter-spacing: -.04em; margin: 6px 0 20px; }
+    .legal-page h2 { font-family: var(--font-display); font-size: 1.15rem; font-weight: 800; margin: 30px 0 10px; }
+    .legal-page h3 { font-size: .95rem; font-weight: 800; margin: 20px 0 6px; }
+    .legal-page p, .legal-page li { color: var(--black-secondary); line-height: 1.7; font-size: .92rem; }
+    .legal-page ul { padding-left: 20px; margin: 10px 0; }
+    .legal-page a { text-decoration: underline; }
+    .legal-back { display: inline-block; margin-bottom: 20px; font-size: .82rem; font-weight: 700; }
+    .legal-todo { padding: 12px 16px; border-radius: 12px; background: rgba(180, 59, 69, .09); color: var(--danger); font-weight: 700; font-size: .85rem; margin: 16px 0 24px; }
+    .legal-updated { color: var(--gray-muted); font-size: .78rem; font-weight: 700; margin-bottom: 24px; }
+  </style>
+  <script src="/js/contact.js" defer></script>
+  <script src="/js/legal.js" defer></script>
+</head>
+<body>
+  <main class="legal-page">
+    <a class="legal-back" href="/">← Back to GreenCart</a>
+    <div class="section-kicker">STORE INFORMATION</div>
+    <h1>Contact us</h1>
+    <p class="legal-updated">Last updated: 6 November 2026</p>
+
+    <p class="legal-todo" data-contact-warning hidden></p>
+
+    <h2>Get in touch</h2>
+    <p>We answer messages within one working day.</p>
+
+    <h3>Email</h3>
+    <p data-contact="email">Not available yet.</p>
+
+    <h3>WhatsApp</h3>
+    <p data-contact="whatsappDisplay">Not available yet.</p>
+
+    <h3>Business</h3>
+    <p><span data-contact="businessName">GreenCart</span><br>
+    <span data-contact="addressLine">Street address</span><br>
+    <span data-contact="city">Port Harcourt</span>, <span data-contact="state">Rivers State</span><br>
+    <span data-contact="country">Nigeria</span></p>
+
+    <h3>Opening hours</h3>
+    <p data-contact="hours">Monday to Saturday, 9am to 6pm.</p>
+
+    <h2>About an order</h2>
+    <p>Include your order reference (it starts with <strong>GC-</strong>) and the email address you used. If you are unsure of the reference, the last four digits of the payment plus the date are enough for us to find it.</p>
+
+    <h2>Something wrong with a delivery</h2>
+    <p>See <a href="/legal/shipping.html">Delivery &amp; returns</a> for the returns window and what we need from you.</p>
+  </main>
+</body>
+</html>

@@ -2,7 +2,160 @@
 
 This file records meaningful repository changes and the checks that support them. See [agent.md](agent.md) for the required entry and handoff rules. Dates use the owner's local date; `Unreleased` means the work is not yet part of a named release.
 
-## Unreleased — 2026-11-05
+## Unreleased — 2026-11-06 (fix pass)
+
+### Fixed — the webhook would have rejected every real payment
+
+- `api/paystack-webhook.js` read the signed bytes for the HMAC, then parsed
+  `request.body` for the event. On a streamed request `request.body` is
+  `undefined`, so **every genuine Paystack webhook would have failed** with "Body
+  was not JSON" while looking correct in review. It now parses the bytes it just
+  verified. Caught by testing over a real HTTP server with a real HMAC rather
+  than only through an in-process mock.
+
+### Fixed — the gateway depended on platform behaviour that was not in effect
+
+- The endpoints used Vercel's convenience helpers (`request.body`,
+  `response.status()`, `response.json()`) and a `module.exports.config =
+  { api: { bodyParser: false } }` export to switch body parsing off. **Vercel does
+  not read that export from `/api`** — it is a Next.js convention — and the
+  documented opt-out is a project-wide `NODEJS_HELPERS=0`, which would have
+  removed `response.status()`/`json()` from the other two endpoints as well. The
+  configuration was therefore both useless and, if it had worked, self-defeating.
+- All three endpoints now use plain Node HTTP through a new `api/_lib/http.js`,
+  which reads the stream **before** ever touching `request.body` (reading it on
+  Vercel invokes the parser and consumes the stream). They behave identically with
+  the helpers on or off, need no `@vercel/node` dependency, and run on any Node
+  host.
+- Verified on a bare `node:http` server: unsigned webhook → 401, wrong signature →
+  401, correctly signed → re-verified, `GET` on a POST endpoint → 405 with
+  `Allow: POST`.
+
+### Fixed — dead money code that could drift
+
+- `js/currency.js` exported `toMinorUnits()`, a second implementation of
+  "convert a price into a charge amount", used nowhere. Two implementations of
+  money maths is how a store ends up charging a different figure from the one it
+  displayed. Removed, with a note in `js/config.js` and `js/currency.js` saying the
+  server alone converts amounts.
+
+### Fixed — 3.8 MB of images on a mobile-first store
+
+- Fourteen product photos were 1024–1254px JPEGs of 400–556 KB, served whole to
+  every visitor on every load. Resized to 1000px (the detail page renders ~660 CSS
+  px, so this is still sharp at 2×) and re-encoded at quality 84: **3.79 MB →
+  980 KB, a 74% reduction**. Checked visually at `deviceScaleFactor: 2`, not just
+  by file size. Originals kept outside the repo.
+
+### Added — contact details with a warning that cannot be missed
+
+- `js/contact.js` holds the business email, WhatsApp number, address and hours
+  used by the legal pages and the footer. The legal pages render from it via
+  `data-contact` hooks, so a number that is right on the contact page cannot be
+  stale in the footer.
+- While any required detail is still a placeholder the pages show a red banner
+  **naming exactly what is missing** ("email address, street address, WhatsApp
+  number"), and channels that do not exist are hidden rather than shown as empty
+  rows. `tests/legal.test.js` asserts this, and the guard test **fails the moment
+  real details are filled in** — verified by filling them in and watching three
+  tests go red, so the suite cannot silently rubber-stamp a half-finished store.
+
+### Verification — fix pass
+
+- `npm test`: **82/82** (was 76). New `tests/legal.test.js` covers the warning,
+  hidden channels, real details replacing placeholders, and the placeholder guard.
+- Mutations: **37/37 caught** (was 34). New mutations cover the webhook parsing
+  the wrong source, verification skipping the amount check, and the legal pages
+  presenting as finished while details are missing.
+- Endpoints exercised over real HTTP with a real HMAC signature, not only
+  in-process.
+
+## Unreleased — 2026-11-06 (later)
+
+### Added — a real card payment gateway, honest until switched on
+
+- **Server-side pricing.** The browser now sends `[{id, quantity}]` and the server prices the order from `js/products.js`. A tampered request cannot buy a ₦403,058 item for ₦100. `api/_lib/pricing.js` reuses the store's own `Store` class, so the discount and shipping rules have exactly one implementation rather than two that drift.
+- **`POST /api/initialize-payment`** prices the bag, refuses unknown/oversized/out-of-stock lines, and asks Paystack for a transaction with the amount it computed. The quoted amount in kobo travels inside `metadata.expectedKobo`.
+- **`POST /api/verify-payment`** is the only code allowed to say money moved. It re-checks with Paystack that the transaction succeeded, that the currency is NGN, and that the amount equals the quote. A cheaper transaction cannot settle an expensive order.
+- **`POST /api/paystack-webhook`** is signature-checked (HMAC-SHA512, constant-time compare) and re-verifies the transaction rather than trusting the payload. Vercel's body parser is disabled for this endpoint, because a re-serialised body can never match the signature — a trap that would have silently rejected every real webhook.
+- **Prices now display in naira by default**, with a header switch to US dollars. Catalogue prices stay in USD; conversion is display-only, so changing currency cannot change what an order is worth. Rate pinned at **₦1,348.02 per $1**, checked 2026-11-06 against exchangerate-api.
+
+### Fixed — three ways the storefront was willing to lie
+
+- **The favicon still showed the old brand's `V`.** It is an inline `data:` URI, so every text-based rebrand search missed it. Now `G`, plus a real `favicon.svg`.
+- **Every order reference was minted `AURA-YYYY-XXXX`** — the old brand on every customer receipt. Now `GC-`. Default promotion `AURA15` → `GC15`; the theme storage key moved from `aura_theme` to `greencart_theme`, reading the legacy value once so an existing visitor keeps their choice.
+- **Three fake payment buttons (`Apple Pay`, `Credit card`, `Crypto / BTC`) collected nothing** while the form said orders were placed. They are gone. One `Card` option remains, and with no public key configured the checkout states that payments are not switched on and **refuses to create an order** — verified in a real browser: the toast appears and `orders.length` stays 0.
+
+### Added — go-live essentials
+
+- `legal/shipping.html`, `privacy.html`, `terms.html`, `contact.html`, linked from the footer. Every unknown — delivery windows, return window, business name, address, contact channels — is marked `PLACEHOLDER — REPLACE BEFORE TAKING REAL ORDERS` in a red callout rather than invented.
+- `robots.txt`, `sitemap.xml`, `favicon.svg`, canonical URL, Open Graph and Twitter metadata, `vercel.json` with security headers and `no-store` on `/api/*`.
+- Admin removed from the public nav (reachable with `?admin=1`). This is convenience, not security: anyone with the URL can still open it. Stated as such in the code.
+
+### Fixed — accessibility regression introduced by the new header control
+
+- Adding the currency switch pushed the header to 366px inside a 320px viewport, breaking horizontal scroll on small phones. The theme switch keeps its symbol and its accessible name; its words move to a visually-hidden span below 480px. Re-measured at 320/360/390/420/480/680/820/1100/1440px: all `scrollWidth` values now equal the viewport.
+
+### Verification — overhaul
+
+- `npm test`: **76/76** (was 44). New: 12 checkout-honesty tests and 20 gateway tests. The gateway tests focus on refusal — forged webhook signatures, wrong currency, amount mismatch, pre-parsed bodies, missing secret key, out-of-stock lines — because a gateway that is generous with bad input is worse than one that is down.
+- Playwright: **47/47**. New `currency.spec.js` covers the naira default, the switch, persistence across reload, and that a naira order is still recorded against the same dollar value.
+- Mutations: **34/34 caught** (was 27). One survived on the first run — *"checkout proceeds even though payments are switched off"* — because the test counted orders, and removing the guard still produced zero orders via a different path. The test now asserts the provider is never contacted, which is the property that actually matters. Fixed rather than deleted.
+- `docs/PAYMENTS.md` documents the Paystack account creation, which key may be public, where the secret key goes, how to test, and what is still missing.
+
+### Still not real
+
+- **A paid order is still recorded only in the buyer's browser.** The webhook confirms the payment to the server and reports `persisted: false`; it does not pretend to have saved an order. Sales are recoverable from the Paystack dashboard until a database exists (`ROADMAP.md` Phase 1–2).
+- Payments remain **off in the committed config**: `payments.publicKey` is empty, so the checkout refuses. Switching it on needs the owner's Paystack account (see `docs/PAYMENTS.md`).
+
+## Unreleased — 2026-11-06
+
+### Fixed — unreadable saved data vanished without a word
+
+- If the stored value was corrupt or the wrong shape, the shop **silently** reverted to seed data. Reproduced end to end: with one real order saved, corrupting the storage key and reloading left **0 orders**, no page error, and nothing on screen to suggest anything was wrong. The stored bytes were still present, so the data was recoverable while the UI implied it had never existed.
+- `Store` now records `recovery = { reason, bytes }` when a key exists but does not parse, or parses to something that is not an object. A key that was never written stays silent — a first visit is not a problem, and conflating the two would show an error banner to every new visitor.
+- The admin shows a `role="alert"` banner above the panels: *"Saved data could not be read. The catalogue and orders below are the built-in defaults, not your saved data (20 bytes stored). Nothing has been overwritten yet: saving any change will replace it."* It states the byte count so the claim is checkable, and does **not** claim the data was deleted, because it wasn't.
+
+### On loading states, deliberately not built
+
+- The Phase 3 table item asks for loading and error states. Error states now exist where failure is genuinely possible. **Loading states were not added**: local storage reads are synchronous, so there is no interval to show a spinner in, and inventing an artificial delay to make a skeleton visible would be theatre that also makes the app slower. Recorded in `ROADMAP.md` as waiting on the Phase 2 APIs rather than ticked off.
+
+### Verification — recovery state
+
+- `npm test`: **44/44**. The store test covers five cases — never written, unparseable, wrong shape, valid, and successfully migrated — and a DOM test covers the banner's wording, `role="alert"`, the byte count, dismissal, and that a re-render does not resurrect a dismissed banner.
+- Playwright: **44/44**, with a browser test that saves a real order, corrupts the real key, reloads, confirms the order really is gone, checks the banner, confirms the stored bytes are untouched, dismisses it, then confirms a clean profile shows no banner.
+- `npm run test:mutation`: **27/27 caught**. Three mutations target this: discarding unreadable data silently, mistaking a first visit for unreadable data, and never showing the banner.
+- This work previously sat unmerged in PR #13 on a branch that was abandoned; it is rebuilt here on top of the GreenCart rename, including the `migratedFrom` interaction.
+
+### Added — contributor permissions guide
+
+- `docs/CONTRIBUTOR-PERMISSIONS.md`: what a repository **contributor** can and cannot do on GitHub and Vercel, the exact errors each blocked action produces, and the workarounds that stay inside the rules. Written because the person doing this work does not own the project.
+
+### Changed — the brand is now GreenCart
+
+- Renamed from **V8's** to **GreenCart** ahead of the domain purchase, so the address and every page agree. Seven places in `index.html` (title, brand logo and its `G` badge, aria-label, admin header kicker, footer, copyright), four `document.title` assignments in `js/app.js`, the `package.json` name, the README title and the mind map.
+- The visible logo is `G GreenCart.` — the existing `.brand-dot` accent is kept, so the mark changes without changing the page's visual language.
+
+### Changed — the storage key moved with the brand, without losing anyone's data
+
+- `v8_store_v1` → **`greencart_store_v1`**. On boot, if the new key has never been written, the store copies any value found under a legacy key across and records `migratedFrom`. Carts, saved items and order history survive the rebrand.
+- The old key is **not deleted**, so a rollback is possible.
+- Once the new key exists it always wins: a stale legacy value cannot override current data. Both directions are covered by tests.
+- `readRaw()` was added to `Store` so "never written" can be told apart from "written but unparseable" — the same distinction the unmerged recovery work needed.
+
+### Changed — CI housekeeping
+
+- **`ci/tests.yml` deleted.** The workflow is active at `.github/workflows/tests.yml` and the two copies were verified byte-identical first; keeping both risked someone editing the reference and seeing no effect.
+- `ci/README.md` rewritten. It previously said the workflow was switched off and gave instructions to activate it — both now false. It documents the real state, the triggers, what runs, how to make the check **required**, and how to read a failure.
+- **CI is active but not enforced.** No branch ruleset exists, so a red run does not block a merge, and `main` deploys to production on every push. Recorded in the README and the go-live runbook rather than left implied.
+- Added `docs/GO-LIVE-HOSTING.md`: the domain and hosting runbook, in GreenCart's name.
+
+### Verification — rebrand
+
+- `npm test`: **42/42**. One new store test covers migration in both directions — legacy adopted when the new key is absent, current key preferred when both exist — and confirms the old key is left intact.
+- Playwright: **43/43**. The one test that read `v8_store_v1` directly was updated to the new key, which is the only place a hardcoded key could have silently stopped asserting anything.
+- `npm run test:mutation`: **24/24 caught**, including two new mutations — ignoring a legacy save, and letting a stale legacy save override current data.
+- Rendered check in Chromium: title, logo, aria-label, footer and admin kicker all read GreenCart.
 
 ### Changed — the five admin lists share one renderer
 

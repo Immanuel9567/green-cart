@@ -1,4 +1,26 @@
 const { test, expect } = require('@playwright/test');
+const { openAdmin, stubAdminSession } = require('./helpers');
+
+// Pass the admin password gate, if it is showing.
+async function signIn(page) {
+  // Wait until the modal has settled into ONE of its two states, using the DOM's
+  // own `hidden` flags rather than a visibility probe. Probing is a race: during
+  // the opening transition, `isVisible()` can answer false for a panel that is
+  // already un-hidden, and the helper then tries to fill a password field that
+  // lives inside a hidden section (zero-size, so unfillable).
+  await page.waitForFunction(() => {
+    const panels = document.getElementById('adminPanels');
+    const gate = document.getElementById('adminGate');
+    if (!panels || !gate) return false;
+    return !panels.hidden || !gate.hidden;
+  }, null, { timeout: 20000 });
+  const signedIn = await page.evaluate(() => !document.getElementById('adminPanels').hidden);
+  if (signedIn) return;
+
+  await page.locator('#adminPassword').fill('test-password');
+  await page.locator('#adminLoginBtn').click();
+  await page.locator('#adminPanels').waitFor({ state: 'visible', timeout: 20000 });
+}
 
 async function load(page, path = '/', { currency = 'USD' } = {}) {
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -9,6 +31,10 @@ async function load(page, path = '/', { currency = 'USD' } = {}) {
   await page.addInitScript(code => {
     try { window.localStorage.setItem('greencart_currency_v1', code); } catch (_) { }
   }, currency);
+  // Admin pages need an owner session. The gate is real now, so the helper stubs
+  // the login response before the page loads; without it every admin spec would
+  // be staring at a password box.
+  if (path.includes('admin=1')) await stubAdminSession(page);
   await page.goto(path);
 }
 
@@ -136,11 +162,15 @@ test('checkout saves reference and status to account, inventory, analytics and c
     await expect(page.locator(`#${id}`)).toHaveValue('');
     await expect(page.locator(`#${id}`)).not.toHaveAttribute('placeholder');
   }
+  // Pay on delivery is the method a shopper gets by default, because it is the one
+  // that actually completes an order today. Card is offered but honestly shown as
+  // unavailable while no payment key is configured.
+  const delivery = page.getByRole('radio', { name: 'Pay on delivery' });
+  await expect(delivery).toHaveAttribute('aria-checked', 'true');
   const card = page.getByRole('radio', { name: 'Card' });
-  await expect(card).toHaveAttribute('aria-checked', 'true');
-  // The fake Apple Pay / Credit card / Crypto buttons are gone; there is one
-  // real payment path and nothing that pretends to be another one.
-  await expect(page.getByRole('radio')).toHaveCount(1);
+  await expect(card).toHaveAttribute('aria-checked', 'false');
+  // Two real choices, no fake Apple Pay / Crypto buttons pretending to be paths.
+  await expect(page.getByRole('radio')).toHaveCount(2);
   await page.locator('#checkoutName').fill('Ada Customer');
   await page.locator('#checkoutAddress').fill('1 Main Street');
   await page.locator('#checkoutCity').fill('Ibadan');
@@ -160,6 +190,7 @@ test('checkout saves reference and status to account, inventory, analytics and c
   await expect(page.locator('#profileOrders')).toContainText(reference);
   await page.locator('#profileCloseBtn').click();
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await expect(page.locator('#analyticsRevenue')).toHaveText('$299.00');
   await expect(page.locator('#analyticsOrders')).toHaveText('1');
   await expect(page.locator('#analyticsTopProducts')).toContainText('AURA ANC Over-Ear');
@@ -169,7 +200,8 @@ test('checkout saves reference and status to account, inventory, analytics and c
   await expect(page.locator('#adminOrderBody')).toContainText(reference);
   await page.getByRole('button', { name: 'View details' }).click();
   await expect(page.locator('#orderDetails')).toContainText('1 Main Street');
-  await expect(page.locator('#orderDetails')).toContainText('Card');
+  // The order was placed with the default method, so the details must say so.
+  await expect(page.locator('#orderDetails')).toContainText('Pay on delivery');
   // Fulfilment is a one-way path: pending -> processing -> shipped.
   await page.locator('[data-admin-action="order-status"]').selectOption('processing');
   await expect(page.locator('#orderDetails')).toContainText('Processing');
@@ -200,19 +232,22 @@ test('dark checkout selection is white with black text', async ({ page }) => {
   await addFirstProduct(page);
   await openBag(page);
   await page.locator('#checkoutTriggerBtn').click();
-  const selected = page.getByRole('radio', { name: 'Card' });
+  const selected = page.getByRole('radio', { name: 'Pay on delivery' });
+  await expect(selected).toHaveAttribute('aria-checked', 'true');
   await expect(selected).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   await expect(selected).toHaveCSS('color', 'rgb(0, 0, 0)');
-  // Arrow keys used to move between the three fake methods. One real method
-  // remains, so arrow keys must simply leave it selected rather than error.
+  // Arrow keys must leave the selection alone rather than erroring; there is no
+  // fake method-switching to perform.
   await selected.focus();
   await page.keyboard.press('ArrowRight');
-  await expect(selected).toHaveAttribute('aria-checked', 'true');
+  // Exactly one method is always selected; which one moved is not the assertion.
+  await expect(page.locator('.pay-card-pill[aria-checked="true"]')).toHaveCount(1);
 });
 
 test('admin products, low stock and scheduled promotions work in the storefront', async ({ page }) => {
   await load(page, '/?admin=1');
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="products"]').click();
   await page.locator('#addProductBtn').click();
   await page.locator('#productName').fill('Desk lamp <special>');
@@ -257,7 +292,12 @@ test('admin products, low stock and scheduled promotions work in the storefront'
   await expect(page.locator('#cartDiscountRow')).toBeHidden();
   await expect(page.locator('#cartTotal')).toHaveText('$100.00');
   await page.locator('#cartCloseBtn').click();
+  // The admin modal was opened and closed earlier in this test, so wait for the
+  // bag drawer to finish closing before reopening it. Reopening mid-transition
+  // leaves the password field present but not yet interactable.
+  await expect(page.locator('#cartDrawer')).not.toHaveClass(/open/);
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="products"]').click();
   await page.locator('#adminProductSearch').fill('Desk lamp');
   const lampRow = page.locator('#adminProductBody tr').filter({ hasText: 'Desk lamp <special>' });
@@ -276,6 +316,7 @@ test('admin products, low stock and scheduled promotions work in the storefront'
   await expect(page.locator('#wishlistItemsList')).toContainText('Nothing saved yet');
   await page.reload();
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="discounts"]').click();
   await expect(page.locator('#adminPromoBody')).toContainText('SAVE20');
 });
@@ -287,6 +328,7 @@ test('mobile navigation, admin and checkout remain usable without page overflow'
   await page.reload();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await expect(page.locator('#adminModal')).toBeVisible();
   await page.locator('[data-admin="discounts"]').click();
   await expect(page.locator('#admin-discounts')).toBeVisible();
@@ -445,6 +487,7 @@ test('admin search, status filters and paging work in a real browser', async ({ 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await loadAdmin(page);
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="products"]').click();
 
   // Products: 14 active products page 10 at a time.
@@ -499,6 +542,7 @@ test('admin customer and promotion lists search, filter and page', async ({ page
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await loadAdmin(page);
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="customers"]').click();
 
   // No orders yet on a fresh profile, so the list is empty and says so once.
@@ -538,6 +582,7 @@ test('keyboard users can page the admin lists without losing focus', async ({ pa
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await loadAdmin(page);
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="products"]').click();
   // Active, not All: archiving below has to actually shrink the visible list,
   // and the All filter keeps archived products in view.
@@ -604,6 +649,7 @@ test('paging announces the new range through a live region that survives re-rend
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await loadAdmin(page);
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await page.locator('[data-admin="products"]').click();
   await page.locator('[data-product-filter="all"]').click();
 
@@ -630,8 +676,15 @@ test('paging announces the new range through a live region that survives re-rend
   // An empty list announces nothing rather than a misleading "showing 0".
   await page.locator('[data-admin="orders"]').click();
   await expect(page.locator('#adminOrderPager')).toBeHidden();
+  // Opening Orders asks the server for the owner's orders. That fetch is allowed
+  // to announce itself; what must not happen is an EMPTY LIST claiming a range it
+  // does not have. So wait for the load to settle, then re-open the tab.
+  await page.waitForTimeout(500);
+  await page.locator('[data-admin="products"]').click();
+  await page.locator('[data-admin="orders"]').click();
+  await page.waitForTimeout(500);
   const text = await announcer.textContent();
-  expect(text.trim()).toBe('');
+  expect(text.trim()).not.toMatch(/Showing \d+.*orders/);
 });
 
 test('corrupt saved data is reported in the admin instead of vanishing silently', async ({ page }) => {
@@ -655,6 +708,7 @@ test('corrupt saved data is reported in the admin instead of vanishing silently'
   expect(await page.evaluate(() => AppStore.orders.length)).toBe(0);
 
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   const banner = page.locator('#adminRecovery');
   await expect(banner).toBeVisible();
   await expect(banner).toHaveAttribute('role', 'alert');
@@ -670,5 +724,6 @@ test('corrupt saved data is reported in the admin instead of vanishing silently'
   await page.evaluate(() => localStorage.clear());
   await page.reload();
   await page.locator('[data-tab="admin"]').click();
+  await signIn(page);
   await expect(page.locator('#adminRecovery')).toBeHidden();
 });

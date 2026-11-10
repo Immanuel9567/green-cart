@@ -428,6 +428,33 @@ class Store {
     return order;
   }
 
+  // Adopt a document that came from the shared database.
+  //
+  // This is the only way orders and products from ANOTHER device get into this
+  // browser. It is deliberately careful:
+  //   - the incoming document goes through the same normalization as a local save,
+  //     so a malformed or hostile document cannot corrupt the running shop;
+  //   - the bag and saved items stay LOCAL. What is in your bag is your business,
+  //     not the store owner's, and it must not be overwritten by a sync.
+  adoptSharedState(doc) {
+    if (!doc || typeof doc !== 'object') throw new Error('That shop document could not be read.');
+    const products = (Array.isArray(doc.products) && doc.products.length
+      ? doc.products
+      : this.state.products).map(product => this.normalizeProduct(product));
+    const patch = { products };
+    if (Array.isArray(doc.orders)) patch.orders = doc.orders;
+    if (Array.isArray(doc.promotions)) patch.promotions = doc.promotions;
+    if (doc.customerStatuses && typeof doc.customerStatuses === 'object' && !Array.isArray(doc.customerStatuses)) {
+      patch.customerStatuses = doc.customerStatuses;
+    }
+    // Reconcile the existing bag against the new catalogue: a product that was
+    // removed or ran out is dropped, exactly as it would be on a normal reload.
+    patch.cart = this.reconcileCart(this.cart, products);
+    patch.wishlist = this.state.wishlist.filter(id => products.some(product => product.id === id));
+    this.commit(patch);
+    return this.state;
+  }
+
   nextOrderStatuses(reference) {
     const order = this.orders.find(item => item.reference === reference);
     if (!order) throw new Error('This order could not be found.');

@@ -39,11 +39,11 @@ function loadPage({ config, storage } = {}) {
     window.document.body.appendChild(script);
   };
   try {
-    ['js/config.js', 'js/currency.js', 'js/products.js', 'js/store.js', 'js/payments.js', 'js/app.js'].forEach(inject);
+    ['js/config.js', 'js/currency.js', 'js/search.js', 'js/products.js', 'js/store.js', 'js/sync.js', 'js/payments.js', 'js/app.js'].forEach(inject);
     // Top-level `const` bindings never reach `window`, so hand the tests the two
     // handles they need rather than weakening the page's scope.
     const bridge = window.document.createElement('script');
-    bridge.textContent = 'window.AppStore = AppStore;';
+    bridge.textContent = 'window.AppStore = AppStore; window.renderCheckoutAvailability = renderCheckoutAvailability;';
     window.document.body.appendChild(bridge);
   } catch (error) {
     errors.push(error);
@@ -56,6 +56,21 @@ function loadPage({ config, storage } = {}) {
 function addFirstProduct(window, document) {
   document.querySelector('[data-action="add-cart"]').click();
   if (!window.AppStore.cart.length) throw new Error('add-to-bag did not add anything');
+}
+
+// Select a payment method, then re-render the disclosure the way the page does.
+// Pay on delivery is the default, so every card test must ask for card.
+function choosePayment(window, document, method) {
+  const pill = [...document.querySelectorAll('.pay-card-pill')].find(item => item.dataset.payment === method);
+  if (!pill) throw new Error(`no payment option called ${method}`);
+  document.querySelectorAll('.pay-card-pill').forEach(item => {
+    const selected = item === pill;
+    item.classList.toggle('active', selected);
+    item.setAttribute('aria-checked', String(selected));
+    item.tabIndex = selected ? 0 : -1;
+  });
+  window.renderCheckoutAvailability();
+  return pill;
 }
 
 // Fill the checkout and press the button, returning once the handler has had a
@@ -95,8 +110,11 @@ test('with payments off, checkout refuses and no order is invented', async () =>
     const { window, document } = page;
     addFirstProduct(window, document);
     document.getElementById('checkoutTriggerBtn').click();
+    choosePayment(window, document, 'Card');
 
-    // The disclosure must say so plainly before the shopper tries.
+    // With card selected the disclosure must say so plainly before the shopper
+    // tries. (Pay on delivery is the default and DOES place orders; card is the
+    // path that still refuses while no key is configured.)
     const disclosure = document.getElementById('checkoutDisclosure');
     assert.match(disclosure.textContent, /not switched on yet/i);
     assert.ok(disclosure.classList.contains('checkout-disclosure-blocked'));
@@ -200,6 +218,7 @@ test('a verified charge records a paid order against a server-confirmed referenc
 
     addFirstProduct(window, document);
     document.getElementById('checkoutTriggerBtn').click();
+    choosePayment(window, document, 'Card');
     await pressPlaceOrder(window, document);
 
     assert.equal(askedAbout, 'PSK-123', 'the browser asks the server about the real reference');
@@ -232,6 +251,7 @@ test('a charge the server refuses to confirm is recorded as unverified, not paid
 
     addFirstProduct(window, document);
     document.getElementById('checkoutTriggerBtn').click();
+    choosePayment(window, document, 'Card');
     await pressPlaceOrder(window, document);
 
     assert.equal(window.AppStore.orders.length, 1, 'the order is kept so a real payment is not lost');
@@ -264,6 +284,7 @@ test('an unreachable verification server does not become a paid order', async ()
 
     addFirstProduct(window, document);
     document.getElementById('checkoutTriggerBtn').click();
+    choosePayment(window, document, 'Card');
     await pressPlaceOrder(window, document);
 
     assert.equal(window.AppStore.orders[0].payment.status, 'unverified');
@@ -285,6 +306,7 @@ test('closing the payment window cancels without charging or ordering', async ()
 
     addFirstProduct(window, document);
     document.getElementById('checkoutTriggerBtn').click();
+    choosePayment(window, document, 'Card');
     await pressPlaceOrder(window, document);
 
     assert.equal(window.AppStore.orders.length, 0);
@@ -306,6 +328,7 @@ test('an empty bag or bad email never reaches the payment provider', async () =>
 
     // Empty bag.
     document.getElementById('checkoutTriggerBtn').click();
+    choosePayment(window, document, 'Card');
     await pressPlaceOrder(window, document);
     assert.equal(providerAsked, false, 'no charge attempt on an empty bag');
 
@@ -341,6 +364,7 @@ test('a succeeded charge that cannot be recorded keeps its reference for the sho
     window.AppStore.placeOrder = () => { throw new Error('storage full'); };
 
     document.getElementById('checkoutTriggerBtn').click();
+    choosePayment(window, document, 'Card');
     await pressPlaceOrder(window, document);
 
     assert.equal(document.getElementById('orderSuccessScreen').hidden, false);
